@@ -21,6 +21,13 @@ source /home/hozh10/.bashrc
 mamba activate repair
 
 ##############################
+# nnU-Net data paths
+##############################
+export nnUNet_raw="$PROJECT_HOME/dev/data/nnUNet_raw"
+export nnUNet_preprocessed="$PROJECT_HOME/dev/data/nnUNet_preprocessed"
+export nnUNet_results="$PROJECT_HOME/dev/data/nnUNet_results"
+
+##############################
 # Go to project dir
 ##############################
 cd "$PROJECT_HOME/dev/nnUNet"   # ← 建议用绝对路径
