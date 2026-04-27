@@ -118,3 +118,4 @@ ENV/
 
 CLAUDE.md
 AGENTS.md
+logs/

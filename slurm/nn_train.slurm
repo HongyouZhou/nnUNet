@@ -29,6 +29,11 @@ export nnUNet_preprocessed="$PROJECT_HOME/dev/data/nnUNet_preprocessed"
 export nnUNet_results="$PROJECT_HOME/dev/data/nnUNet_results"
 
 ##############################
+# CUDA memory hygiene (helps avoid edge-case OOM at large batch / patch)
+##############################
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+##############################
 # Go to project dir
 ##############################
 cd "$PROJECT_HOME/dev/nnUNet"
@@ -42,7 +47,7 @@ export PYTHONPATH="${PWD}"
 ##############################
 # Run nnUNet training
 ##############################
-echo "[SLURM] Starting training on 4 GPUs..."
-python nnunetv2/run/run_training.py 777 3d_fullres all -num_gpus 4 -p nnUNetResEncUNetLPlans
+echo "[SLURM] Starting training on 4 GPUs (resuming from latest checkpoint)..."
+python nnunetv2/run/run_training.py 777 3d_fullres all -num_gpus 4 -p nnUNetResEncUNetLPlans --c
 
 echo "[SLURM] Training finished."
