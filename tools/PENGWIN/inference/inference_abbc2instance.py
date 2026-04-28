@@ -241,12 +241,8 @@ def process_charite_case(input_dir: str,
         print(f"Error: Failed to load CT input file: {ct_input_file}")
         return False
     
-    # Filter out cases where CT has more than 1000 slices on the 3rd dimension
     if ct_array.shape[2] > 1000:
-        print(f"Skipping case {case_name}: CT has {ct_array.shape[2]} slices on 3rd dimension (> 1000)")
-        print(f"CT shape: {ct_array.shape}")
-        return True  # Return True to indicate successful filtering (not an error)
-    
+        print(f"WARNING: case {case_name} has CT shape {ct_array.shape} (z={ct_array.shape[2]} > 1000); processing anyway")
     print(f"CT dimensions: {ct_array.shape} - proceeding with processing")
     
     # Create output directory for this case
