@@ -241,10 +241,8 @@ def process_charite_case(input_dir: str,
         print(f"Error: Failed to load CT input file: {ct_input_file}")
         return False
     
-    if ct_array.shape[2] > 1000:
-        print(f"WARNING: case {case_name} has CT shape {ct_array.shape} (z={ct_array.shape[2]} > 1000); processing anyway")
-    print(f"CT dimensions: {ct_array.shape} - proceeding with processing")
-    
+    print(f"CT dimensions: {ct_array.shape}")
+
     # Create output directory for this case
     case_output_dir = os.path.join(output_dir, case_name)
     os.makedirs(case_output_dir, exist_ok=True)
