@@ -148,10 +148,7 @@ def inference_abbc_instance(load_dir, save_dir, instance_model_dir, fold_instanc
         # 2. 直接保存原始 ABB-C 标签（0: 背景, 1: boundary, 2: core, 3: border）
         # ------------------------------------------------------------------ #
         print("WRITE OUTPUT (raw ABB-C labels)")
-        if len(names) > 1:
-            out_path = join(save_dir, "images", f"{name}_pred.nii.gz")
-        else:
-            out_path = join(save_dir, "images", "output.nii.gz")
+        out_path = join(save_dir, "images", f"{name}_pred.nii.gz")
         # 保存为 int8 即可
         custom_writer(pred_border_core.astype(np.int8), out_path, props, dtype=np.int8)
 

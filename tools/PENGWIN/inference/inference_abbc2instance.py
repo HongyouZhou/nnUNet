@@ -425,9 +425,9 @@ Examples:
     default_output_dir = "/ssdArray/hongyou/dev/data/charite_results/Dataset989_charite/instances"
     
     # Input/Output options
-    parser.add_argument('--input_dir', type=str, default=default_input_dir, 
+    parser.add_argument('-i', '--input_dir', type=str, default=default_input_dir,
                        help=f'Input directory containing Charite case files (default: {default_input_dir})')
-    parser.add_argument('--output_dir', type=str, default=default_output_dir,
+    parser.add_argument('-o', '--output_dir', type=str, default=default_output_dir,
                        help=f'Output directory for results (default: {default_output_dir})')
     
     # ABBC label options
