@@ -8,10 +8,10 @@
 #SBATCH --time=12:00:00
 #SBATCH --output=logs/%x-%j.out
 
-set -euo pipefail
-
 source ~/.bashrc
 mamba activate "${CORTICAL_ENV_NAME:-repair}"
+
+set -euo pipefail
 
 : "${PROJECT_HOME:?Set PROJECT_HOME before submitting this job}"
 export nnUNet_raw="${nnUNet_raw:-$PROJECT_HOME/dev/data/nnUNet_raw}"
@@ -79,4 +79,3 @@ nnUNetv2_preprocess \
     --no_pbar
 
 python -m tools.charite_cortical.continuity_data.audit_dataset "$dataset_dir"
-

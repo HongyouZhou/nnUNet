@@ -9,10 +9,10 @@
 #SBATCH --array=0-4
 #SBATCH --output=logs/%x-fold%A_%a.out
 
-set -euo pipefail
-
 source ~/.bashrc
 mamba activate "${CORTICAL_ENV_NAME:-repair}"
+
+set -euo pipefail
 
 : "${PROJECT_HOME:?Set PROJECT_HOME before submitting this job}"
 : "${SLURM_ARRAY_TASK_ID:?Submit this file as a SLURM array}"
@@ -39,4 +39,3 @@ python nnunetv2/run/run_training.py \
     -p "$plans_name" \
     -num_gpus 1 \
     --c
-

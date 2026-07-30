@@ -9,10 +9,10 @@
 #SBATCH --array=0-67
 #SBATCH --output=logs/%x-case%A_%a.out
 
-set -euo pipefail
-
 source ~/.bashrc
 mamba activate "${CORTICAL_ENV_NAME:-repair}"
+
+set -euo pipefail
 
 : "${PROJECT_HOME:?Set PROJECT_HOME before submitting this job}"
 : "${SLURM_ARRAY_TASK_ID:?Submit this file as a SLURM array}"
@@ -39,4 +39,3 @@ if [[ ! -f "$case_root/o2-dense39.json" ]]; then
         --execute \
         --output "$case_root/o2-dense39.json"
 fi
-

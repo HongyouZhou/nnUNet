@@ -10,8 +10,6 @@
 #SBATCH --array=0-4
 #SBATCH --output=logs/%x-fold%A_%a.out
 
-set -euo pipefail
-
 # One array task trains one fold from scratch (or resumes it with --c).
 # Submit from the repository root after creating logs/:
 #
@@ -21,6 +19,8 @@ set -euo pipefail
 
 source ~/.bashrc
 mamba activate "${CORTICAL_ENV_NAME:-repair}"
+
+set -euo pipefail
 
 : "${PROJECT_HOME:?Set PROJECT_HOME before submitting this job}"
 : "${SLURM_ARRAY_TASK_ID:?Submit this file as a SLURM array}"

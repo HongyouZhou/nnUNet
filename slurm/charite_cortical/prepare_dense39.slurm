@@ -8,10 +8,10 @@
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/%x-%j.out
 
-set -euo pipefail
-
 source ~/.bashrc
 mamba activate "${CORTICAL_ENV_NAME:-repair}"
+
+set -euo pipefail
 
 : "${PROJECT_HOME:?Set PROJECT_HOME before submitting this job}"
 : "${CORTICAL_GATE_FILE:?Set CORTICAL_GATE_FILE to the dense39 gate JSON}"
