@@ -1,0 +1,15 @@
+{
+  "attractive_probability_threshold": 0.7,
+  "cortex_high_threshold": 0.6,
+  "cortex_low_threshold": 0.3,
+  "distance_tie_tolerance": 1e-09,
+  "max_clusters_per_instance": 64,
+  "max_graph_edges": 2000000,
+  "max_graph_nodes": 500000,
+  "min_high_confidence_volume_mm3": 0.0,
+  "min_normalized_energy_gain": 0.0,
+  "min_piece_volume_mm3": 0.0,
+  "min_repulsive_edges_per_cluster": 1,
+  "repulsive_probability_threshold": 0.3,
+  "separator_probability_threshold": 0.6
+}
