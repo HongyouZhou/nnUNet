@@ -188,6 +188,10 @@ class SamplingAndPlansTests(unittest.TestCase):
         }
         frozen = freeze_cortical_continuity_plans(plans)
         self.assertEqual(frozen[SCHEMA_PLANS_KEY]["heads"][-1]["stop"], 20)
+        self.assertEqual(
+            frozen["configurations"]["3d_fullres"]["data_identifier"],
+            "nnUNetResEncUNetMPlansContinuity_3d_fullres",
+        )
         self.assertEqual(FORMAL_NUM_EPOCHS, 500)
         self.assertEqual(FORMAL_ITERATIONS_PER_EPOCH, 250)
         self.assertEqual(FORMAL_INITIAL_LR, 1e-3)

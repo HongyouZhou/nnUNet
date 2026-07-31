@@ -4,8 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=128G
-#SBATCH --time=12:00:00
+#SBATCH --mem=256G
+#SBATCH --time=48:00:00
 #SBATCH --output=logs/%x-%j.out
 
 source ~/.bashrc

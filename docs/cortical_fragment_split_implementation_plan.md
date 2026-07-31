@@ -359,6 +359,11 @@ python -m tools.charite_cortical.continuity_cli build \
 sbatch slurm/charite_cortical/build_plan_preprocess.slurm
 ```
 
+该 CPU 作业申请 8 CPUs、256 GB RAM 和 48 小时。separator 使用标准
+`nnUNetPlans_3d_fullres` 数据目录；C+A plans 在冻结 schema 时强制改为独立的
+`nnUNetResEncUNetMPlansContinuity_3d_fullres`，防止定制 target packing 覆盖
+separator preprocessing。
+
 生成的 plans 名称固定为：
 
 ```text

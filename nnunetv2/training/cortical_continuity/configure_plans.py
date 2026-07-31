@@ -30,6 +30,7 @@ def freeze_cortical_continuity_plans(
     *,
     configuration: str = "3d_fullres",
     direction_set: str = AXIAL_19_DIRECTION_SET,
+    data_identifier: str | None = None,
 ) -> dict[str, Any]:
     """Return a validated copy with a versioned top-level flat-head schema."""
 
@@ -54,6 +55,16 @@ def freeze_cortical_continuity_plans(
             f"Configuration {configuration!r} must use {FORMAL_PREPROCESSOR}; "
             f"got {configuration_value.get('preprocessor_name')!r}"
         )
+    if data_identifier is None:
+        data_identifier = f"nnUNetResEncUNetMPlansContinuity_{configuration}"
+    if not data_identifier or "/" in data_identifier or "\\" in data_identifier:
+        raise ValueError(
+            f"Invalid preprocessing data identifier: {data_identifier!r}"
+        )
+    # ResEncUNetPlanner reuses nnUNetPlans_3d_fullres for ordinary
+    # architecture-only variants. Continuity changes the preprocessor and
+    # packed targets, so it must never share the separator output directory.
+    configuration_value["data_identifier"] = data_identifier
     schema = build_cortical_continuity_schema(
         spacing,
         direction_set=direction_set,
@@ -112,6 +123,13 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="write a separate plans JSON; default updates --plans after creating a backup",
     )
+    parser.add_argument(
+        "--data-identifier",
+        help=(
+            "preprocessed folder identifier; defaults to "
+            "<output-plans-stem>_<configuration>"
+        ),
+    )
     return parser
 
 
@@ -121,11 +139,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     value = json.loads(source.read_text(encoding="utf-8"))
     if not isinstance(value, Mapping):
         raise ValueError("Plans JSON must contain an object")
-    frozen = freeze_cortical_continuity_plans(
-        value,
-        configuration=args.configuration,
-        direction_set=args.direction_set,
-    )
     if args.output is None:
         output = source
         backup = source.with_name(f"{source.stem}.before_cortical_continuity{source.suffix}")
@@ -138,6 +151,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError("Use the default mode for in-place writing so that a backup is preserved")
         if output.exists():
             raise FileExistsError(f"Refusing to overwrite explicit output {output}")
+    data_identifier = (
+        args.data_identifier
+        if args.data_identifier is not None
+        else f"{output.stem}_{args.configuration}"
+    )
+    frozen = freeze_cortical_continuity_plans(
+        value,
+        configuration=args.configuration,
+        direction_set=args.direction_set,
+        data_identifier=data_identifier,
+    )
     _write_json_atomic(output, frozen)
     print(
         f"Wrote {args.direction_set} cortical-continuity schema "
