@@ -13,6 +13,11 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from nnunetv2.preprocessing.preprocessors.charite_supervision_roi import (
+    CHARITE_ROI_PLANS_KEY,
+    roi_plans_contract,
+)
+
 from .schema import (
     AXIAL_19_DIRECTION_SET,
     DENSE_39_DIRECTION_SET,
@@ -23,6 +28,7 @@ from .schema import (
 
 FORMAL_TARGET_SPACING_ZYX = (0.5, 0.5, 0.5)
 FORMAL_PREPROCESSOR = "ChariteCorticalPreprocessor"
+FORMAL_SEPARATOR_PREPROCESSOR = "ChariteSeparatorPreprocessor"
 
 
 def freeze_cortical_continuity_plans(
@@ -61,10 +67,12 @@ def freeze_cortical_continuity_plans(
         raise ValueError(
             f"Invalid preprocessing data identifier: {data_identifier!r}"
         )
-    # ResEncUNetPlanner reuses nnUNetPlans_3d_fullres for ordinary
-    # architecture-only variants. Continuity changes the preprocessor and
-    # packed targets, so it must never share the separator output directory.
+    # Every custom target contract gets an independent preprocessed directory.
+    # Continuity must never share its packed targets with the separator.
     configuration_value["data_identifier"] = data_identifier
+    frozen[CHARITE_ROI_PLANS_KEY] = roi_plans_contract(
+        training_source="fragment_support_sidecar",
+    )
     schema = build_cortical_continuity_schema(
         spacing,
         direction_set=direction_set,
@@ -88,6 +96,41 @@ def freeze_cortical_continuity_plans(
             "random": 10,
         },
     }
+    return frozen
+
+
+def freeze_charite_separator_plans(
+    plans: Mapping[str, Any],
+    *,
+    configuration: str = "3d_fullres",
+    data_identifier: str | None = None,
+) -> dict[str, Any]:
+    frozen = deepcopy(dict(plans))
+    try:
+        configuration_value = frozen["configurations"][configuration]
+    except KeyError as exc:
+        raise KeyError(f"Plans do not contain configuration {configuration!r}") from exc
+    spacing = tuple(float(value) for value in configuration_value["spacing"])
+    if len(spacing) != 3 or not np.allclose(
+        spacing, FORMAL_TARGET_SPACING_ZYX, rtol=0.0, atol=1e-8
+    ):
+        raise ValueError(
+            "Formal Charite separator plans require target spacing "
+            f"{FORMAL_TARGET_SPACING_ZYX} mm z-y-x; got {spacing}"
+        )
+    if configuration_value.get("preprocessor_name") != FORMAL_SEPARATOR_PREPROCESSOR:
+        raise ValueError(
+            f"Configuration {configuration!r} must use {FORMAL_SEPARATOR_PREPROCESSOR}; "
+            f"got {configuration_value.get('preprocessor_name')!r}"
+        )
+    if data_identifier is None:
+        data_identifier = f"nnUNetResEncUNetMPlansSeparator_{configuration}"
+    if not data_identifier or "/" in data_identifier or "\\" in data_identifier:
+        raise ValueError(f"Invalid preprocessing data identifier: {data_identifier!r}")
+    configuration_value["data_identifier"] = data_identifier
+    frozen[CHARITE_ROI_PLANS_KEY] = roi_plans_contract(
+        training_source="separator_semantic_nonbackground",
+    )
     return frozen
 
 
@@ -130,6 +173,11 @@ def _parser() -> argparse.ArgumentParser:
             "<output-plans-stem>_<configuration>"
         ),
     )
+    parser.add_argument(
+        "--separator",
+        action="store_true",
+        help="freeze the ROI-aware separator contract instead of the C+A schema",
+    )
     return parser
 
 
@@ -141,7 +189,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("Plans JSON must contain an object")
     if args.output is None:
         output = source
-        backup = source.with_name(f"{source.stem}.before_cortical_continuity{source.suffix}")
+        backup_tag = "charite_separator" if args.separator else "cortical_continuity"
+        backup = source.with_name(f"{source.stem}.before_{backup_tag}{source.suffix}")
         if not backup.exists():
             shutil.copy2(source, backup)
         print(f"Preserved original plans at {backup}")
@@ -156,17 +205,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.data_identifier is not None
         else f"{output.stem}_{args.configuration}"
     )
-    frozen = freeze_cortical_continuity_plans(
-        value,
-        configuration=args.configuration,
-        direction_set=args.direction_set,
-        data_identifier=data_identifier,
-    )
+    if args.separator:
+        frozen = freeze_charite_separator_plans(
+            value,
+            configuration=args.configuration,
+            data_identifier=data_identifier,
+        )
+    else:
+        frozen = freeze_cortical_continuity_plans(
+            value,
+            configuration=args.configuration,
+            direction_set=args.direction_set,
+            data_identifier=data_identifier,
+        )
     _write_json_atomic(output, frozen)
-    print(
-        f"Wrote {args.direction_set} cortical-continuity schema "
-        f"({frozen[SCHEMA_PLANS_KEY]['heads'][-1]['stop']} logits) to {output}"
-    )
+    if args.separator:
+        print(f"Wrote ROI-aware Charite separator plans to {output}")
+    else:
+        print(
+            f"Wrote {args.direction_set} cortical-continuity schema "
+            f"({frozen[SCHEMA_PLANS_KEY]['heads'][-1]['stop']} logits) to {output}"
+        )
     return 0
 
 

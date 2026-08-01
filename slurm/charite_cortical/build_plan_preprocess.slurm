@@ -23,6 +23,17 @@ source_dataset="${CORTICAL_SOURCE_DATASET:-$PROJECT_HOME/dev/data/segmentation/d
 dataset_dir="$nnUNet_raw/Dataset778_ChariteCorticalContinuity"
 separator_plans="nnUNetResEncUNetMPlansSeparator"
 continuity_plans="nnUNetResEncUNetMPlansContinuity"
+separator_preprocess_processes="${CORTICAL_SEPARATOR_PREPROCESS_PROCESSES:-1}"
+continuity_preprocess_processes="${CORTICAL_CONTINUITY_PREPROCESS_PROCESSES:-1}"
+
+if [[ ! "$separator_preprocess_processes" =~ ^[1-9][0-9]*$ ]]; then
+    echo "CORTICAL_SEPARATOR_PREPROCESS_PROCESSES must be a positive integer" >&2
+    exit 2
+fi
+if [[ ! "$continuity_preprocess_processes" =~ ^[1-9][0-9]*$ ]]; then
+    echo "CORTICAL_CONTINUITY_PREPROCESS_PROCESSES must be a positive integer" >&2
+    exit 2
+fi
 
 cd "$repo_dir"
 mkdir -p logs "$nnUNet_raw" "$nnUNet_preprocessed" "$nnUNet_results"
@@ -48,7 +59,7 @@ nnUNetv2_extract_fingerprint \
 nnUNetv2_plan_experiment \
     -d 778 \
     -pl nnUNetPlannerResEncM \
-    -preprocessor_name DefaultPreprocessor \
+    -preprocessor_name ChariteSeparatorPreprocessor \
     -overwrite_target_spacing 0.5 0.5 0.5 \
     -overwrite_plans_name "$separator_plans"
 
@@ -60,6 +71,11 @@ nnUNetv2_plan_experiment \
     -overwrite_plans_name "$continuity_plans"
 
 python -m nnunetv2.training.cortical_continuity.configure_plans \
+    --plans "$nnUNet_preprocessed/Dataset778_ChariteCorticalContinuity/${separator_plans}.json" \
+    --configuration 3d_fullres \
+    --separator
+
+python -m nnunetv2.training.cortical_continuity.configure_plans \
     --plans "$nnUNet_preprocessed/Dataset778_ChariteCorticalContinuity/${continuity_plans}.json" \
     --configuration 3d_fullres \
     --direction-set axial19
@@ -68,14 +84,14 @@ nnUNetv2_preprocess \
     -d 778 \
     -plans_name "$separator_plans" \
     -c 3d_fullres \
-    -np "$SLURM_CPUS_PER_TASK" \
+    -np "$separator_preprocess_processes" \
     --no_pbar
 
 nnUNetv2_preprocess \
     -d 778 \
     -plans_name "$continuity_plans" \
     -c 3d_fullres \
-    -np "$SLURM_CPUS_PER_TASK" \
+    -np "$continuity_preprocess_processes" \
     --no_pbar
 
 python -m tools.charite_cortical.continuity_data.audit_dataset "$dataset_dir"

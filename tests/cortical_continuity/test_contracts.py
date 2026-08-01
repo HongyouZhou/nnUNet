@@ -4,7 +4,13 @@ import unittest
 
 import numpy as np
 
+from nnunetv2.preprocessing.preprocessors.charite_supervision_roi import (
+    CHARITE_ROI_PLANS_KEY,
+    crop_to_supervision_roi,
+    restore_full_grid_crop_properties,
+)
 from nnunetv2.training.cortical_continuity.configure_plans import (
+    freeze_charite_separator_plans,
     freeze_cortical_continuity_plans,
 )
 from nnunetv2.training.cortical_continuity.packing import (
@@ -95,6 +101,28 @@ class SourcePackingTests(unittest.TestCase):
 
 
 class GridContractTests(unittest.TestCase):
+    def test_supervision_roi_preserves_full_grid_export_mapping(self) -> None:
+        data = np.zeros((1, 10, 12, 14), dtype=np.float32)
+        target = np.zeros((1, 10, 12, 14), dtype=np.int16)
+        support = np.zeros((10, 12, 14), dtype=bool)
+        support[2:5, 3:7, 4:9] = True
+        cropped_data, cropped_target, crop = crop_to_supervision_roi(
+            data,
+            target,
+            support,
+            {"spacing": [1.0, 1.0, 1.0]},
+            margin_mm=0.0,
+        )
+        self.assertEqual(cropped_data.shape, (1, 3, 4, 5))
+        self.assertEqual(cropped_target.shape, (1, 3, 4, 5))
+        properties = {"bbox_used_for_cropping": [[1, 4], [0, 3], [2, 4]]}
+        restore_full_grid_crop_properties(properties, crop, [2, 0, 1])
+        self.assertEqual(properties["shape_before_cropping"], (14, 10, 12))
+        self.assertEqual(
+            properties["bbox_used_for_cropping"],
+            [[5, 8], [2, 5], [5, 7]],
+        )
+
     def test_thin_cortex_retention_is_a_hard_gate(self) -> None:
         source = np.asarray([[[0, 1, 2]]], dtype=np.int16)
         report = assert_instance_retention(source, source.copy())
@@ -192,10 +220,34 @@ class SamplingAndPlansTests(unittest.TestCase):
             frozen["configurations"]["3d_fullres"]["data_identifier"],
             "nnUNetResEncUNetMPlansContinuity_3d_fullres",
         )
+        self.assertEqual(frozen[CHARITE_ROI_PLANS_KEY]["margin_mm"], 32.0)
+        self.assertEqual(
+            frozen[CHARITE_ROI_PLANS_KEY]["inference_source"],
+            "frozen_abbc_provisional_support",
+        )
         self.assertEqual(FORMAL_NUM_EPOCHS, 500)
         self.assertEqual(FORMAL_ITERATIONS_PER_EPOCH, 250)
         self.assertEqual(FORMAL_INITIAL_LR, 1e-3)
         self.assertFalse(frozen["cortical_continuity_training_schedule"]["deep_supervision"])
+
+    def test_separator_plans_use_independent_roi_preprocessing(self) -> None:
+        plans = {
+            "configurations": {
+                "3d_fullres": {
+                    "spacing": [0.5, 0.5, 0.5],
+                    "preprocessor_name": "ChariteSeparatorPreprocessor",
+                }
+            }
+        }
+        frozen = freeze_charite_separator_plans(plans)
+        self.assertEqual(
+            frozen["configurations"]["3d_fullres"]["data_identifier"],
+            "nnUNetResEncUNetMPlansSeparator_3d_fullres",
+        )
+        self.assertEqual(
+            frozen[CHARITE_ROI_PLANS_KEY]["training_source"],
+            "separator_semantic_nonbackground",
+        )
 
     def test_trainer_wrapper_is_importable_by_declared_name(self) -> None:
         self.assertEqual(

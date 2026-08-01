@@ -42,5 +42,5 @@ nnUNetv2_preprocess \
     -d 778 \
     -plans_name nnUNetResEncUNetMPlansContinuityDense39 \
     -c 3d_fullres \
-    -np "$SLURM_CPUS_PER_TASK" \
+    -np "${CORTICAL_CONTINUITY_PREPROCESS_PROCESSES:-1}" \
     --no_pbar

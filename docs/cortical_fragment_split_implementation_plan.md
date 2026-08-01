@@ -359,10 +359,19 @@ python -m tools.charite_cortical.continuity_cli build \
 sbatch slurm/charite_cortical/build_plan_preprocess.slurm
 ```
 
-该 CPU 作业申请 8 CPUs、256 GB RAM 和 48 小时。separator 使用标准
-`nnUNetPlans_3d_fullres` 数据目录；C+A plans 在冻结 schema 时强制改为独立的
-`nnUNetResEncUNetMPlansContinuity_3d_fullres`，防止定制 target packing 覆盖
-separator preprocessing。
+该 CPU 作业申请 8 CPUs、256 GB RAM 和 48 小时。0.5-mm 全体积重采样会使超长 CT
+病例产生数十亿体素，并在并行 worker 中放大峰值内存，因此两套 preprocessor 都在
+重采样前执行 supervision ROI crop：训练时取已知 cortical/support 的包围盒并在物理空间
+外扩 32 mm，然后把外层 ROI bbox 与 nnU-Net 的 nonzero bbox 组合写回 properties，保证
+预测导出仍能恢复到原始全体积坐标。默认每套 preprocessing 使用 1 个 worker；只能在确认
+单病例峰值内存后通过 `CORTICAL_SEPARATOR_PREPROCESS_PROCESSES` 和
+`CORTICAL_CONTINUITY_PREPROCESS_PROCESSES` 显式增加。
+
+separator 与 C+A 分别写入
+`nnUNetResEncUNetMPlansSeparator_3d_fullres` 和
+`nnUNetResEncUNetMPlansContinuity_3d_fullres`，不复用标准目录，也不复用此前的部分结果。
+训练 ROI 只用于定位和限制计算范围；正式 inference 必须使用冻结 ABBC provisional support
+生成同样的 32-mm ROI，fragment identity 的判断证据仍只能来自 cortical prediction。
 
 生成的 plans 名称固定为：
 
@@ -581,6 +590,7 @@ python -m tools.charite_cortical.continuity_cli refine \
 - Dataset778 builder、固定五折、overlap/unknown/synthetic policy、manifest/hash/audit
   已实现；
 - separator baseline 所需三分类标签与独立 ResEnc M plans 路径已实现；
+- separator/C+A 的 32-mm supervision ROI 预处理、全网格导出映射和单 worker 默认值已实现；
 - C+A schema、axial19/dense39、动态 affinity、native-resolution masking、loss、
   40/30/20/10 loader、trainer 与专用 predictor 已实现；
 - split-only MWS、保守 abstention、传播 invariant、separator 后处理、O1/O2、

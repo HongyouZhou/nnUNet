@@ -8,6 +8,10 @@ from typing import List, Union
 import numpy as np
 from batchgenerators.utilities.file_and_folder_operations import load_json
 
+from nnunetv2.preprocessing.preprocessors.charite_supervision_roi import (
+    crop_to_supervision_roi,
+    restore_full_grid_crop_properties,
+)
 from nnunetv2.preprocessing.preprocessors.default_preprocessor import DefaultPreprocessor
 from nnunetv2.training.cortical_continuity.packing import (
     PREPROCESSED_SOURCE_CHANNELS,
@@ -104,9 +108,18 @@ class ChariteCorticalPreprocessor(DefaultPreprocessor):
         )
         contact = semantic_contact_mask(semantic).astype(np.int16, copy=False)
         source_with_contact = np.concatenate((source, contact[None]), axis=0)
+        data, source_with_contact, roi_crop = crop_to_supervision_roi(
+            data,
+            source_with_contact,
+            loaded["support"] == 1,
+            data_properties,
+        )
+        # Release the full-grid sidecars before allocating resampled targets.
+        loaded.clear()
+        del loaded, semantic, source, contact
         if self.verbose:
             print(seg_file)
-        return self.run_case_npy(
+        processed_data, processed_seg, processed_properties = self.run_case_npy(
             data,
             source_with_contact,
             data_properties,
@@ -114,6 +127,12 @@ class ChariteCorticalPreprocessor(DefaultPreprocessor):
             configuration_manager,
             dataset_json,
         )
+        restore_full_grid_crop_properties(
+            processed_properties,
+            roi_crop,
+            plans_manager.transpose_forward,
+        )
+        return processed_data, processed_seg, processed_properties
 
     def run_case_npy(
         self,
@@ -239,6 +258,60 @@ class ChariteCorticalPreprocessor(DefaultPreprocessor):
 # Backward-compatible descriptive name. The frozen plans use
 # ``ChariteCorticalPreprocessor``.
 CorticalContinuityPreprocessor = ChariteCorticalPreprocessor
+
+
+class ChariteSeparatorPreprocessor(DefaultPreprocessor):
+    """Crop separator training cases around supervised cortical support."""
+
+    def run_case(
+        self,
+        image_files: List[str],
+        seg_file: Union[str, None],
+        plans_manager: PlansManager,
+        configuration_manager: ConfigurationManager,
+        dataset_json: Union[dict, str],
+    ):
+        if seg_file is None:
+            return super().run_case(
+                image_files,
+                seg_file,
+                plans_manager,
+                configuration_manager,
+                dataset_json,
+            )
+        if isinstance(dataset_json, str):
+            dataset_json = load_json(dataset_json)
+        rw = plans_manager.image_reader_writer_class()
+        data, data_properties = rw.read_images(image_files)
+        semantic, semantic_properties = rw.read_seg(seg_file)
+        _assert_exact_grid(
+            data,
+            data_properties,
+            semantic,
+            semantic_properties,
+            role="separator semantic label",
+            path=seg_file,
+        )
+        data, semantic, roi_crop = crop_to_supervision_roi(
+            data,
+            semantic,
+            semantic != 0,
+            data_properties,
+        )
+        processed_data, processed_seg, processed_properties = super().run_case_npy(
+            data,
+            semantic,
+            data_properties,
+            plans_manager,
+            configuration_manager,
+            dataset_json,
+        )
+        restore_full_grid_crop_properties(
+            processed_properties,
+            roi_crop,
+            plans_manager.transpose_forward,
+        )
+        return processed_data, processed_seg, processed_properties
 
 
 def _resolve_sidecar_paths(
