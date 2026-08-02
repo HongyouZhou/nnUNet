@@ -29,6 +29,18 @@ from nnunetv2.training.cortical_continuity.sidecar_contract import (
     assert_exact_grid as _assert_exact_grid,
     assert_instance_retention,
 )
+from nnunetv2.training.cortical_separator_prior.contract import (
+    HU_CODE_OFFSET,
+    HU_CODE_CHANNEL,
+    PRIOR_CONTRACT_VERSION,
+    PRIOR_PLANS_KEY,
+    PRIOR_SEPARATOR_KEY,
+    PRIOR_SURFACE_HU_KEY,
+    PRIOR_SURFACE_KEY,
+    SEMANTIC_VALID_BIT,
+    TARGET_CHANNELS,
+    encode_hu,
+)
 from nnunetv2.utilities.plans_handling.plans_handler import ConfigurationManager, PlansManager
 
 
@@ -312,6 +324,195 @@ class ChariteSeparatorPreprocessor(DefaultPreprocessor):
             plans_manager.transpose_forward,
         )
         return processed_data, processed_seg, processed_properties
+
+
+class ChariteDensityPriorSeparatorPreprocessor(DefaultPreprocessor):
+    """Persist semantic/support/validity/surface/HU targets for paired training.
+
+    The HU channel is reconstructed immediately after CT normalization and
+    encoded as a discrete target. It therefore follows spatial augmentation
+    but is never modified by intensity augmentation. The network still sees
+    the original single normalized CT input channel only.
+    """
+
+    def run_case(
+        self,
+        image_files: List[str],
+        seg_file: Union[str, None],
+        plans_manager: PlansManager,
+        configuration_manager: ConfigurationManager,
+        dataset_json: Union[dict, str],
+    ):
+        if seg_file is None:
+            return super().run_case(
+                image_files,
+                seg_file,
+                plans_manager,
+                configuration_manager,
+                dataset_json,
+            )
+        if isinstance(dataset_json, str):
+            dataset_json = load_json(dataset_json)
+        contract = plans_manager.plans.get(PRIOR_PLANS_KEY)
+        if not isinstance(contract, dict) or int(contract.get("schema_version", -1)) != PRIOR_CONTRACT_VERSION:
+            raise RuntimeError(
+                f"Plans must contain {PRIOR_PLANS_KEY} schema {PRIOR_CONTRACT_VERSION}"
+            )
+
+        semantic_path, sidecar_paths = _resolve_sidecar_paths(seg_file, dataset_json)
+        rw = plans_manager.image_reader_writer_class()
+        data, data_properties = rw.read_images(image_files)
+        semantic, semantic_properties = rw.read_seg(str(semantic_path))
+        support, support_properties = rw.read_seg(str(sidecar_paths["support"]))
+        validity, validity_properties = rw.read_seg(str(sidecar_paths["validity"]))
+        for role, value, properties, path in (
+            ("semantic", semantic, semantic_properties, semantic_path),
+            ("support", support, support_properties, sidecar_paths["support"]),
+            ("validity", validity, validity_properties, sidecar_paths["validity"]),
+        ):
+            _assert_exact_grid(
+                data,
+                data_properties,
+                value,
+                properties,
+                role=role,
+                path=path,
+            )
+
+        source = np.concatenate((semantic, support, validity), axis=0)
+        data, source, roi_crop = crop_to_supervision_roi(
+            data,
+            source,
+            support == 1,
+            data_properties,
+        )
+        processed_data, processed, processed_properties = super().run_case_npy(
+            data,
+            source,
+            data_properties,
+            plans_manager,
+            configuration_manager,
+            dataset_json,
+        )
+        restore_full_grid_crop_properties(
+            processed_properties,
+            roi_crop,
+            plans_manager.transpose_forward,
+        )
+        if processed.shape[0] != 3:
+            raise RuntimeError(
+                "Density-prior separator target must contain semantic/support/validity "
+                f"before HU packing; got {processed.shape}"
+            )
+        _validate_values_with_crop_sentinel(processed[0], {-1, 0, 1, 2, 3}, "separator semantic")
+        _validate_values_with_crop_sentinel(processed[1], {-1, 0, 1}, "fragment support")
+        _validate_values_with_crop_sentinel(
+            processed[2], {-1, 0, 1, 2, 3, 4, 5, 6, 7}, "validity bitmask"
+        )
+
+        schemes = tuple(str(value) for value in configuration_manager.normalization_schemes)
+        if schemes != ("CTNormalization",):
+            raise RuntimeError(
+                "Density-prior separator requires one CTNormalization input channel; "
+                f"got {schemes}"
+            )
+        intensity = plans_manager.foreground_intensity_properties_per_channel["0"]
+        mean = float(intensity["mean"])
+        std = float(intensity["std"])
+        hu = processed_data[0].astype(np.float32, copy=False) * std + mean
+        hu_code = encode_hu(hu)
+
+        semantic_processed = np.asarray(processed[0])
+        support_processed = np.asarray(processed[1]) == 1
+        validity_processed = np.asarray(processed[2], dtype=np.int16)
+        valid = (validity_processed & SEMANTIC_VALID_BIT) != 0
+        separator = semantic_processed == 2
+        normal_surface = _normal_fragment_surface(
+            support_processed,
+            separator,
+            valid,
+            spacing_mm_zyx=configuration_manager.spacing,
+            separator_exclusion_mm=2.0,
+        )
+
+        standard_locations = _standard_class_locations(
+            self,
+            processed[:1],
+            plans_manager,
+            dataset_json,
+        )
+        separator_locations = _sample_mask_coordinates(separator, seed=2201)
+        surface_locations = _sample_mask_coordinates(normal_surface, seed=2202)
+        if len(surface_locations):
+            indices = tuple(surface_locations[:, axis] for axis in range(1, 4))
+            surface_hu = hu_code[indices].astype(np.int32) - HU_CODE_OFFSET
+            surface_records = np.concatenate(
+                (surface_locations.astype(np.int32), surface_hu[:, None]),
+                axis=1,
+            )
+        else:
+            surface_records = np.empty((0, 5), dtype=np.int32)
+        standard_locations[PRIOR_SEPARATOR_KEY] = separator_locations
+        standard_locations[PRIOR_SURFACE_KEY] = surface_locations
+        standard_locations[PRIOR_SURFACE_HU_KEY] = surface_records
+        processed_properties["class_locations"] = standard_locations
+        processed_properties[PRIOR_SEPARATOR_KEY] = separator_locations
+        processed_properties[PRIOR_SURFACE_KEY] = surface_locations
+        processed_properties[PRIOR_SURFACE_HU_KEY] = surface_records
+        processed_properties[PRIOR_PLANS_KEY] = {
+            "schema_version": PRIOR_CONTRACT_VERSION,
+            "target_channels": TARGET_CHANNELS,
+            "hu_code_channel": HU_CODE_CHANNEL,
+            "normal_surface_voxels": int(np.count_nonzero(normal_surface)),
+            "separator_voxels": int(np.count_nonzero(separator)),
+        }
+
+        packed = np.concatenate(
+            (
+                processed.astype(np.int16, copy=False),
+                normal_surface.astype(np.int16, copy=False)[None],
+                hu_code[None],
+            ),
+            axis=0,
+        )
+        if packed.shape[0] != TARGET_CHANNELS:
+            raise AssertionError(packed.shape)
+        return processed_data, packed, processed_properties
+
+
+def _normal_fragment_surface(
+    support: np.ndarray,
+    separator: np.ndarray,
+    semantic_valid: np.ndarray,
+    *,
+    spacing_mm_zyx: Union[List[float], tuple[float, ...], np.ndarray],
+    separator_exclusion_mm: float,
+) -> np.ndarray:
+    try:
+        from scipy.ndimage import binary_erosion, distance_transform_edt
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "SciPy is required to construct density-prior normal surfaces"
+        ) from error
+    support_mask = np.asarray(support, dtype=bool)
+    separator_mask = np.asarray(separator, dtype=bool)
+    valid_mask = np.asarray(semantic_valid, dtype=bool)
+    if not (support_mask.shape == separator_mask.shape == valid_mask.shape):
+        raise ValueError("support, separator, and semantic_valid shapes differ")
+    inner_surface = support_mask & ~binary_erosion(
+        support_mask,
+        structure=np.ones((3, 3, 3), dtype=bool),
+        border_value=0,
+    )
+    if np.any(separator_mask):
+        distance = distance_transform_edt(
+            ~separator_mask,
+            sampling=tuple(float(value) for value in spacing_mm_zyx),
+        )
+        away_from_separator = distance > float(separator_exclusion_mm)
+    else:
+        away_from_separator = np.ones(separator_mask.shape, dtype=bool)
+    return inner_surface & valid_mask & away_from_separator
 
 
 def _resolve_sidecar_paths(

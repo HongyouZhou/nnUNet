@@ -24,11 +24,18 @@ from .schema import (
     SCHEMA_PLANS_KEY,
     build_cortical_continuity_schema,
 )
+from nnunetv2.training.cortical_separator_prior.contract import (
+    PRIOR_PLANS_KEY,
+    prior_plans_contract,
+)
 
 
 FORMAL_TARGET_SPACING_ZYX = (0.5, 0.5, 0.5)
 FORMAL_PREPROCESSOR = "ChariteCorticalPreprocessor"
 FORMAL_SEPARATOR_PREPROCESSOR = "ChariteSeparatorPreprocessor"
+FORMAL_DENSITY_PRIOR_SEPARATOR_PREPROCESSOR = (
+    "ChariteDensityPriorSeparatorPreprocessor"
+)
 
 
 def freeze_cortical_continuity_plans(
@@ -134,6 +141,54 @@ def freeze_charite_separator_plans(
     return frozen
 
 
+def freeze_charite_density_prior_separator_plans(
+    plans: Mapping[str, Any],
+    *,
+    configuration: str = "3d_fullres",
+    data_identifier: str | None = None,
+) -> dict[str, Any]:
+    """Freeze the paired control/prior target contract into separate plans."""
+
+    frozen = deepcopy(dict(plans))
+    try:
+        configuration_value = frozen["configurations"][configuration]
+    except KeyError as exc:
+        raise KeyError(f"Plans do not contain configuration {configuration!r}") from exc
+    spacing = tuple(float(value) for value in configuration_value["spacing"])
+    if len(spacing) != 3 or not np.allclose(
+        spacing, FORMAL_TARGET_SPACING_ZYX, rtol=0.0, atol=1e-8
+    ):
+        raise ValueError(
+            "Formal density-prior separator plans require target spacing "
+            f"{FORMAL_TARGET_SPACING_ZYX} mm z-y-x; got {spacing}"
+        )
+    if (
+        configuration_value.get("preprocessor_name")
+        != FORMAL_DENSITY_PRIOR_SEPARATOR_PREPROCESSOR
+    ):
+        raise ValueError(
+            f"Configuration {configuration!r} must use "
+            f"{FORMAL_DENSITY_PRIOR_SEPARATOR_PREPROCESSOR}; got "
+            f"{configuration_value.get('preprocessor_name')!r}"
+        )
+    if data_identifier is None:
+        data_identifier = f"nnUNetResEncUNetMPlansSeparatorDensityPrior_{configuration}"
+    if not data_identifier or "/" in data_identifier or "\\" in data_identifier:
+        raise ValueError(f"Invalid preprocessing data identifier: {data_identifier!r}")
+    configuration_value["data_identifier"] = data_identifier
+    frozen[CHARITE_ROI_PLANS_KEY] = roi_plans_contract(
+        training_source="fragment_support_sidecar",
+    )
+    contract = prior_plans_contract(data_identifier=data_identifier)
+    existing = frozen.get(PRIOR_PLANS_KEY)
+    if existing is not None and existing != contract:
+        raise ValueError(
+            f"Plans already contain a different {PRIOR_PLANS_KEY} contract"
+        )
+    frozen[PRIOR_PLANS_KEY] = contract
+    return frozen
+
+
 def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -173,10 +228,16 @@ def _parser() -> argparse.ArgumentParser:
             "<output-plans-stem>_<configuration>"
         ),
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--separator",
         action="store_true",
         help="freeze the ROI-aware separator contract instead of the C+A schema",
+    )
+    mode.add_argument(
+        "--separator-density-prior",
+        action="store_true",
+        help="freeze the paired density-prior separator target contract",
     )
     return parser
 
@@ -189,7 +250,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("Plans JSON must contain an object")
     if args.output is None:
         output = source
-        backup_tag = "charite_separator" if args.separator else "cortical_continuity"
+        backup_tag = (
+            "charite_separator_density_prior"
+            if args.separator_density_prior
+            else "charite_separator"
+            if args.separator
+            else "cortical_continuity"
+        )
         backup = source.with_name(f"{source.stem}.before_{backup_tag}{source.suffix}")
         if not backup.exists():
             shutil.copy2(source, backup)
@@ -205,7 +272,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.data_identifier is not None
         else f"{output.stem}_{args.configuration}"
     )
-    if args.separator:
+    if args.separator_density_prior:
+        frozen = freeze_charite_density_prior_separator_plans(
+            value,
+            configuration=args.configuration,
+            data_identifier=data_identifier,
+        )
+    elif args.separator:
         frozen = freeze_charite_separator_plans(
             value,
             configuration=args.configuration,
@@ -219,7 +292,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             data_identifier=data_identifier,
         )
     _write_json_atomic(output, frozen)
-    if args.separator:
+    if args.separator_density_prior:
+        print(f"Wrote density-prior Charite separator plans to {output}")
+    elif args.separator:
         print(f"Wrote ROI-aware Charite separator plans to {output}")
     else:
         print(
