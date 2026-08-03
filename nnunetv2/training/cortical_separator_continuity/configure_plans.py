@@ -53,6 +53,14 @@ def freeze_separator_continuity_plans(
             f"Configuration must use {FORMAL_PREPROCESSOR}; got "
             f"{configuration_value.get('preprocessor_name')!r}"
         )
+    # The six target channels contain coupled categorical state. In particular,
+    # instance ownership implies relation-validity at the same voxel. nnU-Net's
+    # label-aware order-1 interpolation operates independently per channel and
+    # can select different boundary voxels for validity and ownership. Joint
+    # nearest-neighbour sampling preserves the source-grid invariant exactly.
+    resampling_kwargs = dict(configuration_value.get("resampling_fn_seg_kwargs", {}))
+    resampling_kwargs.update({"is_seg": True, "order": 0, "order_z": 0})
+    configuration_value["resampling_fn_seg_kwargs"] = resampling_kwargs
     if data_identifier is None:
         data_identifier = f"{FORMAL_PLANS_NAME}_{configuration}"
     if not data_identifier or "/" in data_identifier or "\\" in data_identifier:

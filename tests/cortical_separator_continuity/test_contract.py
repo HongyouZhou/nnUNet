@@ -22,6 +22,11 @@ def _plans():
             "3d_fullres": {
                 "spacing": [0.5, 0.5, 0.5],
                 "preprocessor_name": FORMAL_PREPROCESSOR,
+                "resampling_fn_seg_kwargs": {
+                    "is_seg": True,
+                    "order": 1,
+                    "order_z": 0,
+                },
             }
         }
     }
@@ -40,6 +45,8 @@ def test_frozen_contract_records_layout_offsets_losses_surface_and_density():
     assert contract["normal_surface"]["kind"] == "union_of_per_instance_inner_boundaries"
     assert contract["density"]["includes_gap_voxels"] is False
     assert contract["sampling"] == SAMPLING_WEIGHTS
+    assert contract["target_resampling"]["interpolation"] == "nearest_neighbor"
+    assert frozen["configurations"]["3d_fullres"]["resampling_fn_seg_kwargs"]["order"] == 0
 
 
 def test_contract_rejects_spacing_preprocessor_or_mutation():
@@ -60,4 +67,14 @@ def test_contract_rejects_spacing_preprocessor_or_mutation():
         validate_continuity_plans_contract(
             changed,
             changed["configurations"]["3d_fullres"]["data_identifier"],
+        )
+
+    changed_resampling = deepcopy(frozen)
+    changed_resampling["configurations"]["3d_fullres"]["resampling_fn_seg_kwargs"][
+        "order"
+    ] = 1
+    with pytest.raises(RuntimeError, match="nearest-neighbour"):
+        validate_continuity_plans_contract(
+            changed_resampling,
+            changed_resampling["configurations"]["3d_fullres"]["data_identifier"],
         )

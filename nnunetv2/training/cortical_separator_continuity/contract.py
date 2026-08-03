@@ -199,6 +199,11 @@ def continuity_plans_contract(*, data_identifier: str) -> dict[str, Any]:
         "data_identifier": data_identifier,
         "target_spacing_mm_zyx": list(FORMAL_TARGET_SPACING_ZYX),
         "target_channel_layout": list(TARGET_CHANNEL_LAYOUT),
+        "target_resampling": {
+            "joint_discrete_channels": True,
+            "interpolation": "nearest_neighbor",
+            "order": 0,
+        },
         "pair_offsets": offsets,
         "pair_target": {"same_instance": 0, "different_instance": 1},
         "pair_validity": {
@@ -238,5 +243,24 @@ def validate_continuity_plans_contract(plans: Mapping[str, Any], data_identifier
         raise RuntimeError(
             f"Plans contain a missing or incompatible {CONTINUITY_PLANS_KEY} contract; "
             "regenerate the independent continuity-prior plans"
+        )
+    matching_configurations = [
+        value
+        for value in plans.get("configurations", {}).values()
+        if value.get("data_identifier") == data_identifier
+    ]
+    if len(matching_configurations) != 1:
+        raise RuntimeError(
+            f"Expected exactly one configuration for data identifier {data_identifier!r}"
+        )
+    resampling = matching_configurations[0].get("resampling_fn_seg_kwargs", {})
+    if (
+        resampling.get("is_seg") is not True
+        or resampling.get("order") != 0
+        or resampling.get("order_z") != 0
+    ):
+        raise RuntimeError(
+            "Separator continuity targets must be jointly nearest-neighbour "
+            "resampled so instance ownership and validity remain aligned"
         )
     return expected
