@@ -5,6 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
 #SBATCH --time=48:00:00
 #SBATCH --array=0-5%4
 #SBATCH --output=logs/%x-%A_%a.out
@@ -22,6 +23,17 @@ export nnUNet_raw="${nnUNet_raw:-$PROJECT_HOME/dev/data/nnUNet_raw}"
 export nnUNet_preprocessed="${nnUNet_preprocessed:-$PROJECT_HOME/dev/data/nnUNet_preprocessed}"
 export nnUNet_results="${nnUNet_results:-$PROJECT_HOME/dev/data/nnUNet_results}"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# The six-channel 0.5-mm target is substantially larger than a standard
+# semantic target. Cluster hostnames fall back to 12 training augmentation
+# workers in get_allowed_n_proc_DA(), plus 6 validation workers, which exceeded
+# the former implicit 32-GiB allocation before the first batch. Keep all three
+# pilot arms on the same bounded worker topology and prevent nested BLAS/OpenMP
+# pools inside the augmentation processes.
+export nnUNet_n_proc_DA=4
+export nnUNet_def_n_proc=4
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 
 repo_dir="${CORTICAL_REPO_DIR:-$PROJECT_HOME/dev/nnUNet}"
 dataset_name="Dataset778_ChariteCorticalContinuity"
@@ -60,6 +72,7 @@ else
 fi
 
 echo "[SLURM] trainer=$trainer fold=$fold plans=$plans_name data=$data_identifier"
+echo "[SLURM] cpus=${SLURM_CPUS_PER_TASK:-unknown} mem_per_node_mb=${SLURM_MEM_PER_NODE:-unknown} augmentation_workers=$nnUNet_n_proc_DA"
 python nnunetv2/run/run_training.py \
     778 \
     3d_fullres \
