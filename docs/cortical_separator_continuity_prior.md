@@ -98,3 +98,42 @@ bash slurm/charite_cortical/submit_separator_continuity_remaining.sh
 Matched baseline folds 2–4 always run; each regularized arm is submitted only
 when its corresponding increment passed. This workflow does not invoke a C+A
 predictor, Axial19/Dense39 MWS, or an oracle training gate.
+
+## Complete Slurm DAG
+
+The complete workflow can attach to an already submitted pilot array or submit
+one itself. A dry-run does not submit jobs:
+
+```bash
+PROJECT_HOME=/sc-projects/sc-proj-cc09-repair/hongyou \
+CORTICAL_REPO_DIR=$PROJECT_HOME/dev/nnUNet-separator-continuity \
+bash slurm/charite_cortical/submit_separator_continuity_dag.sh \
+  --pilot-job 10267993 \
+  --dry-run
+```
+
+Remove `--dry-run` to create a run contract and attach the controller. The
+controller checks all six `checkpoint_final.pth` files after the pilot array.
+Missing tasks receive at most three bounded retries with 128 GB host memory.
+Training jobs requeue five minutes before the 48-hour limit and resume through
+`--c`.
+
+The downstream graph is:
+
+```text
+pilot checkpoint guard
+  -> OOF inference (3 arms x folds 0/1)
+  -> separator minimax watershed and downstream evaluation
+  -> continuity and density increment gates
+  -> conditional folds 2-4 training
+  -> folds 2-4 inference and evaluation
+  -> per-arm fivefold merge
+  -> final-summary.json
+```
+
+The frozen postprocessor uses the predicted cortical union as its mask,
+connected low-separator regions (`p_sep < 0.5`) as markers, and `p_sep` as the
+minimum-maximum watershed barrier. GT cortical instances are opened only by
+the evaluation job. Every job ID is recorded in `<run-dir>/jobs.json`; metrics,
+gate decisions, predictions, and final summary remain under the same run
+directory.

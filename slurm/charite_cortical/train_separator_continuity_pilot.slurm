@@ -7,6 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=48:00:00
+#SBATCH --requeue
+#SBATCH --signal=B:USR1@300
 #SBATCH --array=0-5%4
 #SBATCH --output=logs/%x-%A_%a.out
 
@@ -73,6 +75,19 @@ fi
 
 echo "[SLURM] trainer=$trainer fold=$fold plans=$plans_name data=$data_identifier"
 echo "[SLURM] cpus=${SLURM_CPUS_PER_TASK:-unknown} mem_per_node_mb=${SLURM_MEM_PER_NODE:-unknown} augmentation_workers=$nnUNet_n_proc_DA"
+
+training_pid=""
+requeue_for_resume() {
+    echo "[SLURM] Time-limit signal received; terminating trainer and requeueing $SLURM_JOB_ID"
+    if [[ -n "$training_pid" ]]; then
+        kill -TERM "$training_pid" 2>/dev/null || true
+        wait "$training_pid" 2>/dev/null || true
+    fi
+    scontrol requeue "$SLURM_JOB_ID"
+    exit 0
+}
+trap requeue_for_resume USR1
+
 python nnunetv2/run/run_training.py \
     778 \
     3d_fullres \
@@ -80,4 +95,6 @@ python nnunetv2/run/run_training.py \
     -tr "$trainer" \
     -p "$plans_name" \
     -num_gpus 1 \
-    --c
+    --c &
+training_pid="$!"
+wait "$training_pid"

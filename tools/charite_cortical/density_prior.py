@@ -396,11 +396,18 @@ def pilot_gate(control_path: Path, prior_path: Path, output: Path) -> dict[str, 
     recovery_gain = prior_recovery - control_recovery
     control_dice = mean(control_records, "cortical_union_dice")
     prior_dice = mean(prior_records, "cortical_union_dice")
+    # Dataset778 contains multi-fragment patients only. ``intact_false_split``
+    # is therefore defined by the downstream evaluator as the fraction of GT
+    # child fragments that one prediction spuriously splits, and is available
+    # for every patient. Older metric files may additionally flag genuinely
+    # intact cases; use that subset when it exists, otherwise use the complete
+    # patient-macro cohort.
     intact = [record for record in prior_records.values() if bool(record["intact_case"])]
-    if not intact:
-        raise ValueError("Pilot gate requires intact/single-fragment cases")
+    false_split_records = intact or list(prior_records.values())
     false_split_rate = float(
-        np.mean([float(record["intact_false_split"]) for record in intact])
+        np.mean(
+            [float(record["intact_false_split"]) for record in false_split_records]
+        )
     )
     allowed = bool(
         recovery_gain >= 0.03
@@ -428,6 +435,9 @@ def pilot_gate(control_path: Path, prior_path: Path, output: Path) -> dict[str, 
             "prior_all_child_recovery": prior_recovery,
             "all_child_recovery_gain": recovery_gain,
             "prior_intact_false_split_rate": false_split_rate,
+            "false_split_population": (
+                "intact_cases" if intact else "all_gt_child_fragments_patient_macro"
+            ),
             "control_cortical_union_dice": control_dice,
             "prior_cortical_union_dice": prior_dice,
             "cortical_union_dice_delta": prior_dice - control_dice,
