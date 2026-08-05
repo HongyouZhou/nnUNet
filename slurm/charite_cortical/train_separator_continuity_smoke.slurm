@@ -10,8 +10,8 @@
 #SBATCH --array=0-2%3
 #SBATCH --output=logs/%x-%A_%a.out
 
-# One complete fold-0 epoch per arm. This is deliberately separate from all
-# formal trainer output folders and never resumes a previous smoke.
+# Two fold-0 epochs per arm: epoch 0 absorbs Torch compile and epoch 1 measures
+# steady-state throughput. Output is separate and never resumes a prior smoke.
 
 source ~/.bashrc
 mamba activate "${CORTICAL_ENV_NAME:-repair}"

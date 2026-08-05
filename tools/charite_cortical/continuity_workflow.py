@@ -111,7 +111,7 @@ def smoke_status(
     max_epoch_seconds: float = 120.0,
     code_revision: str | None = None,
 ) -> dict[str, Any]:
-    """Gate a clean, full-epoch fold-0 smoke for all three ablation arms."""
+    """Gate the second fold-0 smoke epoch after a compile warm-up epoch."""
 
     if max_epoch_seconds <= 0:
         raise ValueError("max_epoch_seconds must be positive")
@@ -125,13 +125,15 @@ def smoke_status(
             key=lambda path: path.stat().st_mtime,
         )
         epoch_seconds = None
+        epoch_count = 0
         log_path = logs[-1] if logs else None
         if log_path is not None:
             text = log_path.read_text(encoding="utf-8", errors="replace")
             matches = epoch_pattern.findall(text)
+            epoch_count = len(matches)
             if matches:
                 epoch_seconds = float(matches[-1])
-        complete = checkpoint.is_file() and epoch_seconds is not None
+        complete = checkpoint.is_file() and epoch_count >= 2
         within_limit = complete and epoch_seconds <= float(max_epoch_seconds)
         records.append(
             {
@@ -141,6 +143,7 @@ def smoke_status(
                 "trainer": SMOKE_TRAINERS[arm],
                 "checkpoint": str(checkpoint),
                 "training_log": None if log_path is None else str(log_path),
+                "epoch_count": epoch_count,
                 "epoch_seconds": epoch_seconds,
                 "complete": complete,
                 "within_epoch_limit": within_limit,

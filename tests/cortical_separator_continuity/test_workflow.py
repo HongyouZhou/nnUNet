@@ -94,7 +94,8 @@ def test_smoke_gate_requires_all_three_complete_fast_epochs(tmp_path):
         fold.mkdir(parents=True)
         (fold / "checkpoint_final.pth").write_bytes(b"checkpoint")
         (fold / "training_log_2026_8_5_00_00_00.txt").write_text(
-            f"Epoch time: {seconds} s\n", encoding="utf-8"
+            f"Epoch time: 160.0 s\nEpoch time: {seconds} s\n",
+            encoding="utf-8",
         )
 
     passed = smoke_status(results, max_epoch_seconds=120)
@@ -110,6 +111,8 @@ def test_smoke_gate_requires_all_three_complete_fast_epochs(tmp_path):
         / "fold_0"
         / "training_log_2026_8_5_00_00_00.txt"
     )
-    slow_log.write_text("Epoch time: 121.0 s\n", encoding="utf-8")
+    slow_log.write_text(
+        "Epoch time: 160.0 s\nEpoch time: 121.0 s\n", encoding="utf-8"
+    )
     failed = smoke_status(results, max_epoch_seconds=120)
     assert failed["passed"] is False

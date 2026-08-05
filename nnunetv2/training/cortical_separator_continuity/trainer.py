@@ -404,11 +404,11 @@ def _assert_joint_nearest_spatial_transform(training_transforms) -> None:
 
 
 class _CorticalSeparatorSmokeMixin:
-    """One complete nnU-Net epoch in a separate output folder for throughput gating."""
+    """Compile warm-up plus one measured epoch in a separate output folder."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.num_epochs = 1
+        self.num_epochs = 2
         self.save_every = 1
 
 

@@ -72,9 +72,10 @@ bash slurm/charite_cortical/submit_separator_continuity_smoke.sh
 Preparation requests 256 GB CPU memory for 48 hours, builds the independent
 plans and 68-case target, produces five fold calibrations, and writes the raw-
 density AUC JSON. The audit is diagnostic-only: `training_allowed=false` is
-recorded but never blocks preprocessing or the pilot. The smoke runs one full
-fold-0 epoch for each arm in separate output folders and requires every epoch
-to finish within 120 seconds. It never submits the formal pilot automatically.
+recorded but never blocks preprocessing or the pilot. The smoke runs two full
+fold-0 epochs for each arm in separate output folders: epoch 0 absorbs Torch
+compile, and epoch 1 must finish within 120 seconds. It never submits the
+formal pilot automatically.
 The pilot is a one-GPU
 `0-5%4` array with folds 0/1 for matched baseline, continuity, and
 continuity+density; `--c` resumes a 48-hour task from its periodic checkpoint.
@@ -132,7 +133,7 @@ Training jobs requeue five minutes before the 48-hour limit and resume through
 The fail-closed graph is:
 
 ```text
-HPC tests -> three-arm full-epoch smoke -> 120-second throughput gate
+HPC tests -> three-arm compile+measured-epoch smoke -> 120-second throughput gate
   -> explicit formal DAG submission
   -> pilot checkpoint guard
   -> OOF inference (3 arms x folds 0/1)
