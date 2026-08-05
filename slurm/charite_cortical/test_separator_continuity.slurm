@@ -20,7 +20,7 @@ repo_dir="${CORTICAL_REPO_DIR:-$PROJECT_HOME/dev/nnUNet}"
 cd "$repo_dir"
 mkdir -p logs "$CORTICAL_SMOKE_RUN_DIR"
 export PYTHONPATH="$repo_dir"
-pytest -q tests/cortical_separator_continuity
+python -m pytest -q tests/cortical_separator_continuity
 python - "$CORTICAL_SMOKE_RUN_DIR/tests-passed.json" "$CORTICAL_CODE_REVISION" <<'PY'
 import json
 import sys

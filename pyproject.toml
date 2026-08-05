@@ -84,7 +84,8 @@ nnUNetv2_convert_MSD_dataset = "nnunetv2.dataset_conversion.convert_MSD_dataset:
 
 [project.optional-dependencies]
 dev = [
-    "pre-commit"
+    "pre-commit",
+    "pytest>=7",
 ]
 intel_macos = [
     "torch<2.3",
