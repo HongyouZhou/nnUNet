@@ -1,3 +1,5 @@
+import inspect
+
 import torch
 
 from nnunetv2.training.cortical_separator_continuity.contract import (
@@ -123,3 +125,9 @@ def test_zero_regularizer_weights_are_exact_base_dice_ce():
     observed = module(logits, target)
     expected = module.base(logits, target[:, :1])
     assert torch.equal(observed, expected)
+
+
+def test_pair_reduction_has_no_explicit_device_to_host_control_flow():
+    source = inspect.getsource(CorticalSeparatorRegularizedLoss._pair_losses)
+    assert ".item(" not in source
+    assert "torch.any(" not in source

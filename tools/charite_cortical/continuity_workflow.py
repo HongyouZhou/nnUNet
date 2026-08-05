@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -31,6 +32,11 @@ TRAINERS = {
     "matched_base": "nnUNetTrainerCorticalSeparatorMatchedBase",
     "continuity": "nnUNetTrainerCorticalSeparatorContinuity",
     "continuity_density": "nnUNetTrainerCorticalSeparatorContinuityDensityPrior",
+}
+SMOKE_TRAINERS = {
+    "matched_base": "nnUNetTrainerCorticalSeparatorMatchedBaseSmoke",
+    "continuity": "nnUNetTrainerCorticalSeparatorContinuitySmoke",
+    "continuity_density": "nnUNetTrainerCorticalSeparatorContinuityDensityPriorSmoke",
 }
 PILOT_TASKS = tuple(
     (arm, fold) for arm in ARMS for fold in (0, 1)
@@ -85,6 +91,69 @@ def training_output_folder(results_root: Path, arm: str) -> Path:
 
 def checkpoint_path(results_root: Path, arm: str, fold: int) -> Path:
     return training_output_folder(results_root, arm) / f"fold_{fold}" / "checkpoint_final.pth"
+
+
+def smoke_output_folder(results_root: Path, arm: str) -> Path:
+    try:
+        trainer = SMOKE_TRAINERS[arm]
+    except KeyError as error:
+        raise ValueError(f"Unknown separator-continuity arm {arm!r}") from error
+    return (
+        results_root.expanduser().resolve()
+        / DATASET_NAME
+        / f"{trainer}__{PLANS_NAME}__{CONFIGURATION}"
+    )
+
+
+def smoke_status(
+    results_root: Path,
+    *,
+    max_epoch_seconds: float = 120.0,
+    code_revision: str | None = None,
+) -> dict[str, Any]:
+    """Gate a clean, full-epoch fold-0 smoke for all three ablation arms."""
+
+    if max_epoch_seconds <= 0:
+        raise ValueError("max_epoch_seconds must be positive")
+    records = []
+    epoch_pattern = re.compile(r"Epoch time: ([0-9]+(?:\.[0-9]+)?) s")
+    for task_id, arm in enumerate(ARMS):
+        fold_dir = smoke_output_folder(results_root, arm) / "fold_0"
+        checkpoint = fold_dir / "checkpoint_final.pth"
+        logs = sorted(
+            fold_dir.glob("training_log_*.txt"),
+            key=lambda path: path.stat().st_mtime,
+        )
+        epoch_seconds = None
+        log_path = logs[-1] if logs else None
+        if log_path is not None:
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            matches = epoch_pattern.findall(text)
+            if matches:
+                epoch_seconds = float(matches[-1])
+        complete = checkpoint.is_file() and epoch_seconds is not None
+        within_limit = complete and epoch_seconds <= float(max_epoch_seconds)
+        records.append(
+            {
+                "task_id": task_id,
+                "arm": arm,
+                "fold": 0,
+                "trainer": SMOKE_TRAINERS[arm],
+                "checkpoint": str(checkpoint),
+                "training_log": None if log_path is None else str(log_path),
+                "epoch_seconds": epoch_seconds,
+                "complete": complete,
+                "within_epoch_limit": within_limit,
+            }
+        )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "kind": "separator_continuity_performance_smoke",
+        "code_revision": code_revision,
+        "max_epoch_seconds": float(max_epoch_seconds),
+        "passed": all(record["within_epoch_limit"] for record in records),
+        "records": records,
+    }
 
 
 def training_status(
@@ -531,6 +600,11 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("--arm", choices=ARMS)
     status.add_argument("--output", type=Path, required=True)
     status.add_argument("--print-missing", action="store_true")
+    smoke = commands.add_parser("smoke-status")
+    smoke.add_argument("--results-root", type=Path, required=True)
+    smoke.add_argument("--max-epoch-seconds", type=float, default=120.0)
+    smoke.add_argument("--code-revision")
+    smoke.add_argument("--output", type=Path, required=True)
     mapping = commands.add_parser("map-task")
     mapping.add_argument("--task-id", type=int, required=True)
     mapping.add_argument("--field", choices=("arm", "fold", "trainer"), required=True)
@@ -573,6 +647,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(",".join(str(item) for item in value["missing_task_ids"]))
         else:
             print(json.dumps(value, sort_keys=True))
+    elif args.command == "smoke-status":
+        value = smoke_status(
+            args.results_root,
+            max_epoch_seconds=args.max_epoch_seconds,
+            code_revision=args.code_revision,
+        )
+        _write_json_atomic(args.output, value)
+        print(json.dumps(value, sort_keys=True))
+        return 0 if value["passed"] else 1
     elif args.command == "map-task":
         arm, fold = arm_fold_from_pilot_task(args.task_id)
         print({"arm": arm, "fold": fold, "trainer": trainer_for_arm(arm)}[args.field])

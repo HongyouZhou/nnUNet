@@ -7,6 +7,8 @@ from tools.charite_cortical.continuity_workflow import (
     arm_fold_from_pilot_task,
     evaluate_instances,
     minimax_watershed_instances,
+    smoke_output_folder,
+    smoke_status,
 )
 from tools.charite_cortical.density_prior import pilot_gate
 
@@ -79,3 +81,35 @@ def test_gate_uses_child_false_split_rate_when_no_patient_is_intact(tmp_path):
         result["metrics"]["false_split_population"]
         == "all_gt_child_fragments_patient_macro"
     )
+
+
+def test_smoke_gate_requires_all_three_complete_fast_epochs(tmp_path):
+    results = tmp_path / "results"
+    for arm, seconds in (
+        ("matched_base", 42.0),
+        ("continuity", 75.0),
+        ("continuity_density", 90.0),
+    ):
+        fold = smoke_output_folder(results, arm) / "fold_0"
+        fold.mkdir(parents=True)
+        (fold / "checkpoint_final.pth").write_bytes(b"checkpoint")
+        (fold / "training_log_2026_8_5_00_00_00.txt").write_text(
+            f"Epoch time: {seconds} s\n", encoding="utf-8"
+        )
+
+    passed = smoke_status(results, max_epoch_seconds=120)
+    assert passed["passed"] is True
+    assert [record["epoch_seconds"] for record in passed["records"]] == [
+        42.0,
+        75.0,
+        90.0,
+    ]
+
+    slow_log = (
+        smoke_output_folder(results, "continuity_density")
+        / "fold_0"
+        / "training_log_2026_8_5_00_00_00.txt"
+    )
+    slow_log.write_text("Epoch time: 121.0 s\n", encoding="utf-8")
+    failed = smoke_status(results, max_epoch_seconds=120)
+    assert failed["passed"] is False

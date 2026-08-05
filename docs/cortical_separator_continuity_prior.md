@@ -26,6 +26,9 @@ interface between touching instances.
 
 ## Pair and loss contract
 
+All six target channels use one joint nearest-neighbour spatial transform for
+rotation and scaling. The trainer validates this at startup; the generic
+nnU-Net categorical interpolation remains unchanged for unrelated trainers.
 Pairs are rebuilt from the augmented instance channel at loss time. There are
 13 undirected local half-edges and three axis-aligned two-voxel edges, giving
 16 channels at the frozen 0.5 mm spacing. A pair is usable only when both
@@ -58,15 +61,21 @@ the finest output; deep-supervision branches retain Dice+CE.
 Commit and push local changes first. On HPC, the scripts use a fixed checkout
 and `git pull --ff-only`; do not edit the HPC checkout directly.
 
+After preparation, run the fail-closed performance smoke before submitting a
+formal pilot:
+
 ```bash
 sbatch slurm/charite_cortical/prepare_separator_continuity_prior.slurm
-bash slurm/charite_cortical/submit_separator_continuity_pilot.sh
+bash slurm/charite_cortical/submit_separator_continuity_smoke.sh
 ```
 
 Preparation requests 256 GB CPU memory for 48 hours, builds the independent
 plans and 68-case target, produces five fold calibrations, and writes the raw-
 density AUC JSON. The audit is diagnostic-only: `training_allowed=false` is
-recorded but never blocks preprocessing or the pilot. The pilot is a one-GPU
+recorded but never blocks preprocessing or the pilot. The smoke runs one full
+fold-0 epoch for each arm in separate output folders and requires every epoch
+to finish within 120 seconds. It never submits the formal pilot automatically.
+The pilot is a one-GPU
 `0-5%4` array with folds 0/1 for matched baseline, continuity, and
 continuity+density; `--c` resumes a 48-hour task from its periodic checkpoint.
 
@@ -102,12 +111,14 @@ predictor, Axial19/Dense39 MWS, or an oracle training gate.
 ## Complete Slurm DAG
 
 The complete workflow can attach to an already submitted pilot array or submit
-one itself. A dry-run does not submit jobs:
+one itself, but requires a successful smoke generated from the exact current
+Git revision. A dry-run does not submit jobs:
 
 ```bash
 PROJECT_HOME=/sc-projects/sc-proj-cc09-repair/hongyou \
 CORTICAL_REPO_DIR=$PROJECT_HOME/dev/nnUNet-separator-continuity \
 bash slurm/charite_cortical/submit_separator_continuity_dag.sh \
+  --smoke-run-dir /absolute/path/to/passed-smoke-run \
   --pilot-job 10267993 \
   --dry-run
 ```
@@ -118,10 +129,12 @@ Missing tasks receive at most three bounded retries with 128 GB host memory.
 Training jobs requeue five minutes before the 48-hour limit and resume through
 `--c`.
 
-The downstream graph is:
+The fail-closed graph is:
 
 ```text
-pilot checkpoint guard
+HPC tests -> three-arm full-epoch smoke -> 120-second throughput gate
+  -> explicit formal DAG submission
+  -> pilot checkpoint guard
   -> OOF inference (3 arms x folds 0/1)
   -> separator minimax watershed and downstream evaluation
   -> continuity and density increment gates

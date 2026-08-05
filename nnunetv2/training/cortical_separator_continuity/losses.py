@@ -137,47 +137,40 @@ class CorticalSeparatorRegularizedLoss(nn.Module):
             q_cut = pair.q_cut.clamp(min=eps, max=1.0 - eps)
             same = pair.valid & ~pair.different
             different = pair.valid & pair.different
-            if torch.any(same):
-                same_sum = same_sum + (-torch.log1p(-q_cut[same])).sum()
-                same_count = same_count + same.sum(dtype=torch.float32)
-            if torch.any(different):
-                different_sum = different_sum + (-torch.log(q_cut[different])).sum()
-                different_count = different_count + different.sum(dtype=torch.float32)
+            same_sum = same_sum + (-torch.log1p(-q_cut[same])).sum()
+            same_count = same_count + same.sum(dtype=torch.float32)
+            different_sum = different_sum + (-torch.log(q_cut[different])).sum()
+            different_count = different_count + different.sum(dtype=torch.float32)
 
             if self.density_weight:
                 if pair.density_pair is None:
                     raise AssertionError("Density calibration did not produce pair density")
                 density_same = pair.density_candidate & ~pair.different
                 density_different = pair.density_candidate & pair.different
-                if torch.any(density_same):
-                    density_same_sum = density_same_sum + (
-                        (1.0 - pair.density_pair[density_same])
-                        * -torch.log1p(-q_cut[density_same])
-                    ).sum()
-                    density_same_count = density_same_count + density_same.sum(
-                        dtype=torch.float32
-                    )
-                if torch.any(density_different):
-                    density_different_sum = density_different_sum + (
-                        pair.density_pair[density_different]
-                        * -torch.log(q_cut[density_different])
-                    ).sum()
-                    density_different_count = (
-                        density_different_count
-                        + density_different.sum(dtype=torch.float32)
-                    )
+                density_same_sum = density_same_sum + (
+                    (1.0 - pair.density_pair[density_same])
+                    * -torch.log1p(-q_cut[density_same])
+                ).sum()
+                density_same_count = density_same_count + density_same.sum(
+                    dtype=torch.float32
+                )
+                density_different_sum = density_different_sum + (
+                    pair.density_pair[density_different]
+                    * -torch.log(q_cut[density_different])
+                ).sum()
+                density_different_count = (
+                    density_different_count
+                    + density_different.sum(dtype=torch.float32)
+                )
 
-        continuity = zero
-        if bool(same_count.detach().item()):
-            continuity = continuity + same_sum / same_count
-        if bool(different_count.detach().item()):
-            continuity = continuity + different_sum / different_count
-
-        density_loss = zero
-        if bool(density_same_count.detach().item()):
-            density_loss = density_loss + density_same_sum / density_same_count
-        if bool(density_different_count.detach().item()):
-            density_loss = density_loss + density_different_sum / density_different_count
+        continuity = _safe_class_mean(same_sum, same_count)
+        continuity = continuity + _safe_class_mean(
+            different_sum, different_count
+        )
+        density_loss = _safe_class_mean(density_same_sum, density_same_count)
+        density_loss = density_loss + _safe_class_mean(
+            density_different_sum, density_different_count
+        )
 
         return continuity, density_loss, {
             "valid_same_pairs": same_count.detach(),
@@ -186,6 +179,13 @@ class CorticalSeparatorRegularizedLoss(nn.Module):
                 density_same_count + density_different_count
             ).detach(),
         }
+
+
+def _safe_class_mean(total: torch.Tensor, count: torch.Tensor) -> torch.Tensor:
+    """Return a differentiable zero for an empty class without a host sync."""
+
+    denominator = count.clamp_min(1.0)
+    return torch.where(count > 0, total / denominator, total * 0.0)
 
 
 def _validate_target(target: torch.Tensor) -> None:

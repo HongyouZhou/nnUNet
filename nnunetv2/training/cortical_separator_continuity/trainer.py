@@ -13,6 +13,7 @@ import torch
 import torch.distributed as dist
 from batchgenerators.dataloading.nondet_multi_threaded_augmenter import NonDetMultiThreadedAugmenter
 from batchgenerators.dataloading.single_threaded_augmenter import SingleThreadedAugmenter
+from batchgeneratorsv2.transforms.spatial.spatial import SpatialTransform
 from torch.amp import autocast
 from torch._dynamo import OptimizedModule
 
@@ -169,7 +170,9 @@ class _nnUNetTrainerCorticalSeparatorContinuityBase(nnUNetTrainer):
             foreground_labels=self.label_manager.foreground_labels,
             regions=None,
             ignore_label=self.label_manager.ignore_label,
+            segmentation_interpolation_mode="nearest",
         )
+        _assert_joint_nearest_spatial_transform(training_transforms)
         validation_transforms = self.get_validation_transforms(
             deep_supervision_scales,
             is_cascaded=False,
@@ -380,3 +383,49 @@ class nnUNetTrainerCorticalSeparatorContinuityDensityPrior(
 
     continuity_weight = CONTINUITY_WEIGHT
     density_weight = DENSITY_WEIGHT
+
+
+def _assert_joint_nearest_spatial_transform(training_transforms) -> None:
+    """Fail closed if the six discrete target channels are not transformed jointly."""
+
+    spatial_transforms = [
+        transform
+        for transform in getattr(training_transforms, "transforms", ())
+        if isinstance(transform, SpatialTransform)
+    ]
+    if len(spatial_transforms) != 1:
+        raise RuntimeError(
+            "Separator continuity training requires exactly one SpatialTransform"
+        )
+    if spatial_transforms[0].mode_seg != "nearest":
+        raise RuntimeError(
+            "Separator continuity target augmentation must use joint nearest-neighbour interpolation"
+        )
+
+
+class _CorticalSeparatorSmokeMixin:
+    """One complete nnU-Net epoch in a separate output folder for throughput gating."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.num_epochs = 1
+        self.save_every = 1
+
+
+class nnUNetTrainerCorticalSeparatorMatchedBaseSmoke(
+    _CorticalSeparatorSmokeMixin, nnUNetTrainerCorticalSeparatorMatchedBase
+):
+    """Full-epoch performance smoke for the matched baseline."""
+
+
+class nnUNetTrainerCorticalSeparatorContinuitySmoke(
+    _CorticalSeparatorSmokeMixin, nnUNetTrainerCorticalSeparatorContinuity
+):
+    """Full-epoch performance smoke for continuity."""
+
+
+class nnUNetTrainerCorticalSeparatorContinuityDensityPriorSmoke(
+    _CorticalSeparatorSmokeMixin,
+    nnUNetTrainerCorticalSeparatorContinuityDensityPrior,
+):
+    """Full-epoch performance smoke for conditional density."""

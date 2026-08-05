@@ -3,17 +3,19 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $0 [--pilot-job JOBID] [--run-dir PATH] [--max-attempts N] [--dry-run]" >&2
+    echo "Usage: $0 --smoke-run-dir PATH [--pilot-job JOBID] [--run-dir PATH] [--max-attempts N] [--dry-run]" >&2
 }
 
 pilot_job=""
 run_dir=""
+smoke_run_dir=""
 max_attempts=3
 dry_run=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --pilot-job) pilot_job="$2"; shift 2 ;;
         --run-dir) run_dir="$2"; shift 2 ;;
+        --smoke-run-dir) smoke_run_dir="$2"; shift 2 ;;
         --max-attempts) max_attempts="$2"; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
         *) usage; exit 2 ;;
@@ -38,6 +40,7 @@ if (( dry_run )); then
     cat <<EOF
 separator-continuity DAG dry-run
   run_dir: $run_dir
+  required smoke run: ${smoke_run_dir:-not supplied}
   upstream pilot: ${pilot_job:-submit 0-5%4 with 128G}
   completion: checkpoint_final guard, at most $max_attempts bounded 128G retries
   pilot inference: 0-5%4, one OOF arm/fold per task
@@ -48,6 +51,30 @@ separator-continuity DAG dry-run
 EOF
     exit 0
 fi
+
+if [[ -z "$smoke_run_dir" ]]; then
+    echo "--smoke-run-dir is required; formal pilot submission is fail-closed" >&2
+    exit 2
+fi
+revision="$(git rev-parse HEAD)"
+python - "$smoke_run_dir/smoke-status.json" "$revision" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).expanduser().resolve(strict=True)
+expected_revision = sys.argv[2]
+status = json.loads(path.read_text(encoding="utf-8"))
+if status.get("kind") != "separator_continuity_performance_smoke":
+    raise RuntimeError(f"Unexpected smoke status contract in {path}")
+if status.get("passed") is not True:
+    raise RuntimeError(f"Performance smoke did not pass: {path}")
+if status.get("code_revision") != expected_revision:
+    raise RuntimeError(
+        "Smoke code revision differs from the formal pilot checkout: "
+        f"{status.get('code_revision')} != {expected_revision}"
+    )
+PY
 
 mkdir -p "$run_dir"
 export PYTHONPATH="$repo_dir"
