@@ -54,7 +54,7 @@ def test_same_different_targets_and_lifted_path_max():
     assert lifted.valid.numel() == 1
     assert lifted.valid.item()
     assert lifted.different.item()
-    assert lifted.q_cut.item() == 0.8
+    assert torch.allclose(lifted.q_cut, torch.tensor([[[[0.8]]]]))
 
 
 def test_lifted_density_uses_endpoints_and_not_middle_gap():

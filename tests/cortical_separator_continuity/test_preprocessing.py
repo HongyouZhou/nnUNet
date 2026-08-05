@@ -8,6 +8,9 @@ from nnunetv2.preprocessing.preprocessors.cortical_separator_continuity_preproce
     _validate_raw_channels,
     normal_surface_per_instance,
 )
+from nnunetv2.training.cortical_separator_continuity.contract import (
+    RELATION_VALID_BIT,
+)
 
 
 def test_per_instance_surface_keeps_touching_interface_lost_by_union_first():
@@ -70,6 +73,7 @@ def test_instance_validation_overlap_padding_and_retention():
 
     processed = np.zeros((4, 3, 3, 3), dtype=np.int16)
     processed[:, 0] = -1
+    processed[2, 1, 1, 1] = RELATION_VALID_BIT
     processed[3, 1, 1, 1] = 1
     _validate_processed_channels(processed)
     assert _assert_instance_retention({1}, processed[3])["status"] == "PASS"
