@@ -83,7 +83,12 @@ def _recursive_find_python_class(folder: str, class_name: str, current_module: s
             )
             if verbose:
                 print(f"  Inspecting module: {search_module}")
-            m = importlib.import_module(search_module)
+            try:
+                m = importlib.import_module(search_module)
+            except Exception as e:
+                if verbose:
+                    print(f"  Skipping module {search_module}: {type(e).__name__}: {e}")
+                continue
             if hasattr(m, class_name):
                 if verbose:
                     print(f"Found class {class_name} in {search_module}")

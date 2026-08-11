@@ -5,7 +5,7 @@ except:
     pass
 
 from challenge_pengwin.utils.utils import load_filenames, MedVol
-from tqdmp import tqdmp
+from tools.PENGWIN.utils.parallel import tqdmp
 from os.path import join
 from pathlib import Path
 import numpy as np

@@ -24,17 +24,26 @@ from typing import Tuple, Optional
 import sys
 import shutil
 
-# Add the project root to Python path to import abbc2instance
-project_root = Path(__file__).parent.parent.parent
-sys.path.append(str(project_root))
+# Allow this file to be executed directly from outside the repository root.
+project_root = Path(__file__).resolve().parents[3]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
-try:
-    from tools.PENGWIN.abbc_conversion.abbc2instance import abbc2instance
-    from tools.PENGWIN.postprocess.abbc_watershed import process_volume
-except ImportError as e:
-    print(f"Error importing modules: {e}")
-    print("Please make sure you're running this script from the correct directory")
-    sys.exit(1)
+from tools.PENGWIN.postprocess.abbc_watershed import process_volume
+
+
+def _load_original_converter():
+    """Load the legacy converter only when the original method is selected."""
+    try:
+        from tools.PENGWIN.abbc_conversion.abbc2instance import abbc2instance
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "The original ABBC converter requires its optional legacy "
+            "dependencies (connected-components-3d, numpy-indexed and "
+            f"scikit-fmm). Missing module: {exc.name!r}. Install the legacy "
+            "dependencies or select --method watershed."
+        ) from exc
+    return abbc2instance
 
 
 def load_nifti(file_path: str) -> Tuple[np.ndarray, dict]:
@@ -136,6 +145,7 @@ def convert_abbc_to_instance(abbc_array: np.ndarray,
     
     if method == 'original':
         # Convert ABBC to instance using original method
+        abbc2instance = _load_original_converter()
         instances, num_instances = abbc2instance(
             abbc=abbc_array,
             core_label=core_label,

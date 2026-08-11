@@ -16,21 +16,43 @@
 from datetime import datetime
 from pathlib import Path
 import os
+import argparse
 
 from inference_abbc import inference_abbc_instance
 
 if __name__ == "__main__":
     print("[%s] start inference_docker.py in main" % str(datetime.now()))
-    INPUT_PATH = Path(os.environ['PROJECT_HOME']) / "dev/data/nnUNet_raw/Dataset989_charite/imagesTr/"
-    OUTPUT_PATH = Path(os.environ['PROJECT_HOME']) / "dev/data/charite_results/Dataset989_charite/"
-    RESOURCE_PATH = Path(os.environ['PROJECT_HOME']) / "dev/data/nnUNet_results/Dataset989_charite/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/"
+    parser = argparse.ArgumentParser(description="Run ABBC instance inference")
+    parser.add_argument(
+        "-i", "--input_dir",
+        type=str,
+        default=None,
+        help="Path to input images",
+    )
+    parser.add_argument(
+        "-o", "--output_dir",
+        type=str,
+        default=None,
+        help="Path to output directory",
+    )
+    parser.add_argument("--method", type=str, default=None)
+    args = parser.parse_args()
 
-    load_dir = INPUT_PATH
-    save_dir = OUTPUT_PATH
+    input_path = Path(os.environ['PROJECT_HOME']) / "dev/data/nnUNet_raw/Dataset989_charite/imagesTr/"
+    output_path = Path(os.environ['PROJECT_HOME']) / "dev/data/charite_results/Dataset989_charite/"
+    resource_path = Path(
+        os.environ.get(
+            "RESOURCE_PATH",
+            "/sc-projects/sc-proj-cc09-repair/hongyou/dev/data/nnUNet_results/Dataset777_Merged/nnUNetTrainer_L3SamplingCE3_ChariteV3FineTune150__nnUNetResEncUNetMPlans__3d_fullres/",
+        )
+    )
+
+    load_dir = Path(args.input_dir) if args.input_dir is not None else input_path
+    save_dir = Path(args.output_dir) if args.output_dir is not None else output_path
     # instance_model_dir = RESOURCE_PATH / "instance_model"
     # semantic_model_dir = RESOURCE_PATH / "semantic_model"
-    instance_model_dir = RESOURCE_PATH
-    semantic_model_dir = RESOURCE_PATH
+    instance_model_dir = resource_path
+    semantic_model_dir = resource_path
     fold_instance = ("all",)
     fold_semantic = ("all",)
 

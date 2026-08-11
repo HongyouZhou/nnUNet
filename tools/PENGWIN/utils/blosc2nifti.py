@@ -1,6 +1,6 @@
 from challenge_pengwin.utils.utils import load_filenames, MedVol
 from challenge_pengwin.border_core_conversion.instance2border_core import instance2border_core_fixed as instance2border_core
-from tqdmp import tqdmp
+from tools.PENGWIN.utils.parallel import tqdmp
 from os.path import join
 from pathlib import Path
 import blosc2

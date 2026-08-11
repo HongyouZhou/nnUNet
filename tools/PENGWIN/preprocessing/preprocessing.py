@@ -29,7 +29,7 @@ from tqdm import tqdm
 from tools.PENGWIN.utils.bounding_boxes import *
 from pathlib import Path
 import os
-from tqdmp import tqdmp
+from tools.PENGWIN.utils.parallel import tqdmp
 import shutil
 
 _MASK = np.array([1.0, 0.0, -1.0])

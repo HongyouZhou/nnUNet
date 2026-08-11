@@ -30,7 +30,7 @@ from scipy.ndimage import binary_dilation, binary_erosion, convolve, distance_tr
 from scipy.spatial import distance
 from skimage.measure import regionprops
 from skimage.morphology import ball, binary_dilation
-from tqdmp import tqdmp
+from tools.PENGWIN.utils.parallel import tqdmp
 
 from tools.PENGWIN.utils.bounding_boxes import *
 

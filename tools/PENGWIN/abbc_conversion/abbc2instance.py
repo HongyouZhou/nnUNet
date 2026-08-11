@@ -24,9 +24,9 @@ import skfmm
 from scipy.ndimage import label as nd_label
 from scipy.ndimage.morphology import distance_transform_edt
 from skimage.morphology import cube, dilation
-from tqdmp import tqdmp
 
 from tools.PENGWIN.utils.bounding_boxes import *
+from tools.PENGWIN.utils.parallel import tqdmp
 
 
 def abbc2instance(abbc: np.ndarray, core_label: int = 2, boundary_label: int = 1, border_label: int = 3,
