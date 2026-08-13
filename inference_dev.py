@@ -49,10 +49,11 @@ if __name__ == "__main__":
         help="Deployment path containing post-processing bone masks",
     )
     parser.add_argument(
-        "--side",
+        "--side", "--SIDE",
+        dest="side",
         choices=("L", "R", "left", "right"),
         default=None,
-        help="Laterality override; normally read from config.json",
+        help="Laterality (L/R); falls back to config.json or the SIDE environment variable",
     )
     args = parser.parse_args()
 

@@ -20,6 +20,11 @@ whether the uploaded CT is called `ct.nii.gz`, has an nnU-Net `_0000` suffix,
 or uses an operation UUID. Repositioning consumes the named masks; Landmarks
 may consume the aggregate file.
 
+Laterality is required and can be supplied with `--side L/R` (also accepted as
+`--SIDE`), the deployment `SIDE` environment variable, or `config.json`. The
+same side-aware names are embedded in the `seg.nii.gz` NIfTI metadata, so label
+1 and `segmentations/tibia_L.nii.gz`, for example, cannot drift apart.
+
 The public output contains only postprocessed, bone-named fragment
 segmentations. ABB-C labels and the anonymous instance map are internal
 intermediate representations and are never published as pipeline artifacts.

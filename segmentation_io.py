@@ -69,7 +69,7 @@ def default_output_directory(input_path: str | Path) -> Path:
 
 
 def read_laterality(input_path: str | Path, explicit: str | None = None) -> str:
-    """Resolve L/R from a deployment override or the case ``config.json``."""
+    """Resolve L/R from CLI, case config, or deployment environment."""
 
     candidate = explicit
     case_dir = default_output_directory(input_path)
@@ -91,7 +91,12 @@ def read_laterality(input_path: str | Path, explicit: str | None = None) -> str:
                 values.extend((ui.get("side"), ui.get("laterality")))
             candidate = next((value for value in values if value is not None), None)
     if candidate is None:
-        candidate = os.environ.get("SEGMENTATION_SIDE", "L")
+        candidate = os.environ.get("SIDE") or os.environ.get("SEGMENTATION_SIDE")
+    if candidate is None:
+        raise ValueError(
+            "Segmentation laterality is required; pass --side/--SIDE, set SIDE, "
+            "or provide config.json"
+        )
 
     normalized = str(candidate).strip().lower()
     if normalized in {"l", "left", "links"}:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -102,6 +103,32 @@ def build_named_segmentations(
     return named_masks, aggregate
 
 
+def build_aggregate_label_names(
+    named_masks: Mapping[str, np.ndarray], laterality: str
+) -> dict[int, str]:
+    """Return aggregate label names matching the named-mask filenames."""
+
+    side = str(laterality).strip().upper()
+    if side not in {"L", "R"}:
+        raise ValueError(f"laterality must be L or R, got {laterality!r}")
+
+    labels: dict[int, str] = {0: "background"}
+    pattern = re.compile(
+        rf"^({'|'.join(BONE_ORDER)})_{side}(?:_fragment_([1-9][0-9]*))?\.nii\.gz$"
+    )
+    for filename in named_masks:
+        match = pattern.fullmatch(filename)
+        if match is None:
+            raise ValueError(f"Named segmentation does not match side {side}: {filename}")
+        bone, fragment_text = match.groups()
+        rank = 0 if fragment_text is None else int(fragment_text)
+        block_start, capacity = BONE_LABEL_BLOCKS[bone]
+        if rank >= capacity:
+            raise ValueError(f"Named segmentation exceeds {bone} label block: {filename}")
+        labels[block_start + rank] = filename.removesuffix(".nii.gz")
+    return dict(sorted(labels.items()))
+
+
 def export_named_segmentations(
     instance_path: str | Path,
     report: Mapping[str, Any],
@@ -120,6 +147,7 @@ def export_named_segmentations(
     named_masks, aggregate = build_named_segmentations(
         instances, assignments, laterality
     )
+    label_names = build_aggregate_label_names(named_masks, laterality)
 
     root = Path(output_dir)
     segmentation_dir = root / "segmentations"
@@ -137,6 +165,20 @@ def export_named_segmentations(
 
     aggregate_header = reference.header.copy()
     aggregate_header.set_data_dtype(np.uint8)
+    aggregate_header.extensions.clear()
+    aggregate_header.extensions.append(
+        nib.nifti1.Nifti1Extension(
+            6,
+            json.dumps(
+                {
+                    "schema": "repair.segmentation.labels.v1",
+                    "side": str(laterality).strip().upper(),
+                    "labels": {str(value): name for value, name in label_names.items()},
+                },
+                sort_keys=True,
+            ).encode("utf-8"),
+        )
+    )
     aggregate_path = root / aggregate_filename
     nib.save(
         nib.Nifti1Image(aggregate, reference.affine, aggregate_header),

@@ -206,6 +206,13 @@ class FragmentBoneAssignmentNiftiTests(unittest.TestCase):
                 set(np.unique(np.asanyarray(aggregate_image.dataobj))),
                 {1, 2, 21},
             )
+            metadata = json.loads(
+                aggregate_image.header.extensions[0].get_content().decode("utf-8")
+            )
+            self.assertEqual(metadata["side"], "L")
+            self.assertEqual(metadata["labels"]["1"], "tibia_L")
+            self.assertEqual(metadata["labels"]["2"], "tibia_L_fragment_1")
+            self.assertEqual(metadata["labels"]["21"], "fibula_L")
             self.assertEqual(
                 {path.name for path in named},
                 {

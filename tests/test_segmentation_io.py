@@ -99,6 +99,22 @@ def test_postprocessing_inputs_are_resolved_from_case(tmp_path: Path) -> None:
     assert resolve_bone_masks_directory(tmp_path) == masks.resolve()
 
 
+def test_side_environment_is_accepted(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "ct.nii.gz").touch()
+    monkeypatch.setenv("SIDE", "R")
+
+    assert read_laterality(tmp_path) == "R"
+
+
+def test_side_is_required_without_any_source(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "ct.nii.gz").touch()
+    monkeypatch.delenv("SIDE", raising=False)
+    monkeypatch.delenv("SEGMENTATION_SIDE", raising=False)
+
+    with pytest.raises(ValueError, match="laterality is required"):
+        read_laterality(tmp_path)
+
+
 def test_non_nifti_file_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "ct.mha"
     path.touch()
