@@ -11,8 +11,10 @@ import numpy as np
 from tools.PENGWIN.postprocess.assign_fragments_to_bones import (
     AssignmentConfig,
     assign_from_overlap_counts,
+    build_named_segmentations,
     build_assignment_report,
     compute_array_overlap_counts,
+    export_named_segmentations,
     main,
 )
 from tools.PENGWIN.postprocess.assign_fragments_to_bones_batch import (
@@ -21,6 +23,37 @@ from tools.PENGWIN.postprocess.assign_fragments_to_bones_batch import (
 
 
 class FragmentBoneAssignmentTests(unittest.TestCase):
+    def test_builds_komo_named_masks_and_bone_aware_aggregate(self) -> None:
+        instances = np.zeros((6, 4, 3), dtype=np.uint16)
+        instances[0:3] = 7
+        instances[3:5] = 2
+        instances[5:6] = 9
+        assignments = {
+            "7": {"bone": "tibia"},
+            "2": {"bone": "tibia"},
+            "9": {"bone": "fibula"},
+        }
+
+        masks, aggregate = build_named_segmentations(instances, assignments, "L")
+
+        self.assertEqual(
+            set(masks),
+            {"tibia_L.nii.gz", "tibia_L_fragment_1.nii.gz", "fibula_L.nii.gz"},
+        )
+        self.assertEqual(set(np.unique(masks["tibia_L.nii.gz"])), {0, 255})
+        self.assertEqual(set(np.unique(aggregate)), {1, 2, 21})
+        self.assertTrue(np.all(aggregate[instances == 7] == 1))
+        self.assertTrue(np.all(aggregate[instances == 2] == 2))
+        self.assertTrue(np.all(aggregate[instances == 9] == 21))
+
+    def test_named_export_rejects_unknown_bones(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no usable bone name"):
+            build_named_segmentations(
+                np.ones((2, 2, 2), dtype=np.uint8),
+                {"1": {"bone": "unknown"}},
+                "L",
+            )
+
     def test_multiple_fragments_receive_the_same_bone_prefix(self) -> None:
         instances = np.zeros((8, 8, 8), dtype=np.uint16)
         instances[0:2, :, :] = 1
@@ -116,7 +149,7 @@ class FragmentBoneAssignmentNiftiTests(unittest.TestCase):
             self.assertEqual(report["instances"]["2"]["name"], "tibia_2")
             self.assertEqual(report["instances"]["3"]["name"], "fibula_3")
             self.assertEqual(report["summary"]["assigned_instances"], 3)
-            self.assertEqual(report["missing_bone_masks"], ["femur", "patella"])
+            self.assertEqual(report["missing_bone_masks"], ["femur", "patella", "fabella"])
 
             output = root / "result" / "instance_classes.json"
             exit_code = main(
@@ -135,6 +168,52 @@ class FragmentBoneAssignmentNiftiTests(unittest.TestCase):
             with output.open(encoding="utf-8") as handle:
                 written = json.load(handle)
             self.assertEqual(written["instances"]["2"]["bone"], "tibia")
+
+    def test_postprocessing_writes_seg_nifti_and_named_masks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            affine = np.array(
+                [[-0.7, 0, 0, 12], [0, -0.7, 0, 30], [0, 0, 1.2, -4], [0, 0, 0, 1]],
+                dtype=float,
+            )
+            instances = np.zeros((6, 5, 4), dtype=np.uint16)
+            instances[0:3] = 4
+            instances[3:5] = 8
+            instances[5:6] = 9
+            instance_path = root / "internal_instances.nii.gz"
+            self._save(instance_path, instances, affine)
+            report = {
+                "instances": {
+                    "4": {"bone": "tibia"},
+                    "8": {"bone": "tibia"},
+                    "9": {"bone": "fibula"},
+                }
+            }
+
+            named, aggregate_path = export_named_segmentations(
+                instance_path,
+                report,
+                root / "output",
+                "L",
+            )
+
+            self.assertEqual(aggregate_path.name, "seg.nii.gz")
+            self.assertTrue(aggregate_path.is_file())
+            aggregate_image = nib.load(str(aggregate_path))
+            self.assertEqual(aggregate_image.shape, instances.shape)
+            self.assertTrue(np.allclose(aggregate_image.affine, affine))
+            self.assertEqual(
+                set(np.unique(np.asanyarray(aggregate_image.dataobj))),
+                {1, 2, 21},
+            )
+            self.assertEqual(
+                {path.name for path in named},
+                {
+                    "tibia_L.nii.gz",
+                    "tibia_L_fragment_1.nii.gz",
+                    "fibula_L.nii.gz",
+                },
+            )
 
     def test_rejects_shape_and_affine_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -180,7 +259,7 @@ class FragmentBoneAssignmentBatchTests(unittest.TestCase):
                     instances,
                     affine,
                 )
-                for bone in ("tibia", "fibula", "femur", "patella"):
+                for bone in ("tibia", "fibula", "femur", "patella", "fabella"):
                     mask = (instances > 0).astype(np.uint8) if bone == assigned_bone else np.zeros_like(instances)
                     self._save(
                         totalseg_root / case_name / f"{bone}.nii.gz",
@@ -216,7 +295,7 @@ class FragmentBoneAssignmentBatchTests(unittest.TestCase):
             self._save(root / "instances" / "ct" / "ct_instance.nii.gz", instances, affine)
             self._save(root / "totalseg" / "ct" / "tibia.nii.gz", instances, affine)
 
-            with self.assertRaisesRegex(FileNotFoundError, "fibula, femur, patella"):
+            with self.assertRaisesRegex(FileNotFoundError, "fibula, femur, patella, fabella"):
                 process_assignment_directories(root / "instances", root / "totalseg")
 
     def test_rejects_empty_instance_root(self) -> None:

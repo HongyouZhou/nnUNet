@@ -20,7 +20,7 @@ try:
 except:
     pass
 import os
-import shutil
+import tempfile
 import timeit
 from datetime import datetime
 from os.path import join
@@ -42,7 +42,23 @@ from tools.PENGWIN.postprocess.postprocess_abbc import (
     get_anatomical_mappings,
     quick_remap_instance_labels,
 )
-from tools.PENGWIN.utils.utils import MedVol, load_filenames
+from tools.PENGWIN.inference.inference_abbc2instance import convert_abbc_to_instance
+from tools.PENGWIN.postprocess.assign_fragments_to_bones import (
+    build_assignment_report,
+    export_named_segmentations,
+)
+from tools.PENGWIN.utils.utils import load_filenames
+from segmentation_io import (
+    publish_contract_output,
+    publish_named_segmentations,
+    resolve_inputs,
+    resolve_output_paths,
+)
+
+
+# ABB-C is an implementation detail of the segmentation stage.  It must not
+# appear in the service CLI or in the published pipeline artifacts.
+_ABBC_TO_INSTANCE_METHOD = "watershed"
 
 
 def _dice_for_label(pred: np.ndarray, gt: np.ndarray, label: int) -> float:
@@ -84,16 +100,29 @@ def _mean_iou(pred: np.ndarray, gt: np.ndarray, ignore_label: int = 0) -> float:
     return float(np.mean(ious))
 
 
-def inference_abbc_instance(load_dir, save_dir, instance_model_dir, fold_instance, gt_dir=None):
+def inference_abbc_instance(
+    load_dir,
+    save_dir,
+    instance_model_dir,
+    fold_instance,
+    bone_masks_dir,
+    laterality,
+    gt_dir=None,
+    contract_output_dir=None,
+):
     """
     推理入口（仅实例分割版本）。
 
     Args:
-        load_dir           (str): 待预测 *.mha 影像所在目录。
-        save_dir           (str): 结果保存根目录，会在其中创建
-                                  images/。
+        load_dir           (str): ``ct.nii.gz`` 路径，或待预测 NIfTI 目录。
+        save_dir           (str): 结果保存目录。契约单例输出为
+                                  ``seg.nii.gz``。
         instance_model_dir (str): 训练好的 abbc 实例模型目录。
         fold_instance      (tuple): 需要使用的 fold，例如 (0,) 或 ("all",)。
+        bone_masks_dir     (str): post-processing 的具名骨骼 masks 目录。
+        laterality        (str): 输出文件名使用的 L/R 侧别。
+        contract_output_dir (str): 可选 FILE_UPLOAD 根目录；单病例同时发布
+                                  固定名 ``seg.nii.gz`` 供下游递归查找。
     """
     load_dir = os.path.expandvars(load_dir)
     save_dir = os.path.expandvars(save_dir)
@@ -107,23 +136,14 @@ def inference_abbc_instance(load_dir, save_dir, instance_model_dir, fold_instanc
     dice_all, iou_all = [], []      # 用来汇总整体平均
 
     print("LOAD IMAGE")
-    names = load_filenames(load_dir)
-    for name in names:
+    input_files = resolve_inputs(load_dir)
+    output_files = resolve_output_paths(input_files, save_dir)
+    predictor = None
+    for input_file, output_file in zip(input_files, output_files):
+        name = input_file.name[:-7]
         print(f"########################   {name}    ##############################")
-        img, props = custom_reader(join(load_dir, f"{name}.nii.gz"))
+        img, props = custom_reader(input_file)
         print("IMAGE SHAPE:", img.shape)
-
-        # ------------------------------------------------------------------ #
-        # 0. 复制原始 CT 图像到输出目录，方便与预测结果一并查看
-        # ------------------------------------------------------------------ #
-        ct_out_path = join(
-            save_dir,
-            "images",
-            f"{name}_input.nii.gz",
-        )
-        Path(os.path.dirname(ct_out_path)).mkdir(parents=True, exist_ok=True)
-        if not Path(ct_out_path).is_file():           # 避免重复复制
-            shutil.copyfile(join(load_dir, f"{name}.nii.gz"), ct_out_path)
 
         # ------------------------------------------------------------------ #
         # 1. 预测 (或读取缓存) adaptive-boundary-border-core segmentation
@@ -134,23 +154,63 @@ def inference_abbc_instance(load_dir, save_dir, instance_model_dir, fold_instanc
             pred_border_core, _ = custom_reader(predfile)
             pred_border_core = pred_border_core[0, ...]  # 去掉通道维
         else:
-            predictor = nnUNetPredictor(use_mirroring=False)
-            predictor.initialize_from_trained_model_folder(instance_model_dir, use_folds=fold_instance, checkpoint_name="checkpoint_final.pth")
+            if predictor is None:
+                predictor = nnUNetPredictor(use_mirroring=False)
+                predictor.initialize_from_trained_model_folder(instance_model_dir, use_folds=fold_instance, checkpoint_name="checkpoint_final.pth")
             pred_border_core = predictor.predict_from_list_of_npy_arrays(
                 [img], segs_from_prev_stage_or_list_of_segs_from_prev_stage=None, properties_or_list_of_properties=[props], truncated_ofname=None
             )[0]
             # 缓存预测，方便后续调参
-            if len(names) > 1:
+            if len(input_files) > 1:
                 Path(predfile.parent).mkdir(parents=True, exist_ok=True)
                 custom_writer(pred_border_core, predfile, props, dtype=np.int8)
 
-        # ------------------------------------------------------------------ #
-        # 2. 直接保存原始 ABB-C 标签（0: 背景, 1: boundary, 2: core, 3: border）
-        # ------------------------------------------------------------------ #
-        print("WRITE OUTPUT (raw ABB-C labels)")
-        out_path = join(save_dir, "images", f"{name}_pred.nii.gz")
-        # 保存为 int8 即可
-        custom_writer(pred_border_core.astype(np.int8), out_path, props, dtype=np.int8)
+        # The network predicts ABB-C classes (boundary/core/border). The
+        # service contract, however, is an instance map consumed by the
+        # repositioner. Never expose the raw 0..3 class image as seg.nii.gz.
+        instances, num_instances = convert_abbc_to_instance(
+            pred_border_core,
+            ct_array=img[0],
+            method=_ABBC_TO_INSTANCE_METHOD,
+            progressbar=False,
+        )
+        print("POST-PROCESS BONE NAMES AND WRITE KOMO SEGMENTATIONS")
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="repair-segmentation-") as temporary:
+            internal_instance_file = Path(temporary) / "instances.nii.gz"
+            custom_writer(
+                instances.astype(np.uint16),
+                str(internal_instance_file),
+                props,
+                dtype=np.uint16,
+            )
+            report = build_assignment_report(
+                internal_instance_file,
+                bone_masks_dir,
+            )
+            named_files, aggregate_file = export_named_segmentations(
+                internal_instance_file,
+                report,
+                output_file.parent,
+                laterality,
+                aggregate_filename=output_file.name,
+            )
+        if aggregate_file != output_file:
+            raise RuntimeError(
+                f"Segmentation exporter wrote an unexpected aggregate path: {aggregate_file}"
+            )
+        if not output_file.is_file():
+            raise RuntimeError(f"Segmentation writer did not create required output: {output_file}")
+        print(f"WROTE AGGREGATE SEGMENTATION: {output_file}")
+        print(f"WROTE {len(named_files)} NAMED MASKS: {output_file.parent / 'segmentations'}")
+
+        if contract_output_dir is not None and len(input_files) == 1:
+            contract_file = publish_contract_output(output_file, contract_output_dir)
+            contract_named_dir = publish_named_segmentations(
+                output_file.parent / "segmentations", contract_output_dir
+            )
+            print(f"PUBLISHED CONTRACT SEGMENTATION: {contract_file}")
+            print(f"PUBLISHED NAMED SEGMENTATIONS: {contract_named_dir}")
 
         # ---------------- 评  测 -----------------
         if gt_dir is not None:
@@ -164,11 +224,11 @@ def inference_abbc_instance(load_dir, save_dir, instance_model_dir, fold_instanc
                 gt = gt[0]                                 # 去掉通道
 
                 # 计算各标签 Dice / IoU（忽略 0）
-                labels = np.union1d(np.unique(pred_border_core), np.unique(gt))
+                labels = np.union1d(np.unique(instances), np.unique(gt))
                 labels = labels[labels != 0]
                 dices, ious = [], []
                 for lb in labels:
-                    pred_m, gt_m = pred_border_core == lb, gt == lb
+                    pred_m, gt_m = instances == lb, gt == lb
                     inter = np.logical_and(pred_m, gt_m).sum()
                     union = np.logical_or(pred_m,  gt_m).sum()
                     dices.append(1.0 if pred_m.sum()+gt_m.sum()==0 else 2*inter/(pred_m.sum()+gt_m.sum()))

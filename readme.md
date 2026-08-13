@@ -4,6 +4,26 @@ nnU-Net is a semantic segmentation framework that automatically adapts its pipel
 
 It is primarily designed for supervised biomedical image segmentation, but it also works well as a strong baseline and development framework for researchers working on new segmentation methods.
 
+## REPAIR service inference contract
+
+For a single-case service invocation, use `inference_dev.py -i <FILE_UPLOAD>`.
+Bone-name post-processing masks must be available in the case's
+`postprocessing/`, `totalsegmentator/`, or `bone_masks/` directory (or through
+the deployment-only `BONE_MASKS_DIR` setting). The results are published as
+`<FILE_UPLOAD>/segmentations/*.nii.gz` using the same convention as
+`all_komo_cases.zip`, for example `tibia_L.nii.gz`,
+`tibia_L_fragment_1.nii.gz`, and `fibula_L.nii.gz`.
+
+An aggregate `<FILE_UPLOAD>/seg.nii.gz` is also written for consumers that
+only accept one NIfTI. It uses bone-aware label blocks, irrespective of
+whether the uploaded CT is called `ct.nii.gz`, has an nnU-Net `_0000` suffix,
+or uses an operation UUID. Repositioning consumes the named masks; Landmarks
+may consume the aggregate file.
+
+The public output contains only postprocessed, bone-named fragment
+segmentations. ABB-C labels and the anonymous instance map are internal
+intermediate representations and are never published as pipeline artifacts.
+
 If you are looking for nnU-Net v1, use the [v1 branch](https://github.com/MIC-DKFZ/nnUNet/tree/nnunetv1). If you are migrating from v1, start with the [TLDR migration guide](documentation/tldr_migration_guide_from_v1.md).
 
 ![nnU-Net overview](documentation/assets/nnU-Net_overview.png)

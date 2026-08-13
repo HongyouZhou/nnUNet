@@ -23,7 +23,18 @@ import nibabel as nib
 import numpy as np
 
 
-BONE_ORDER = ("tibia", "fibula", "femur", "patella")
+BONE_ORDER = ("tibia", "fibula", "femur", "patella", "fabella")
+
+# The aggregate label map is retained for consumers that only accept one
+# NIfTI.  The named binary masks below are the canonical REPAIR/KOMO case
+# representation.
+BONE_LABEL_BLOCKS: dict[str, tuple[int, int]] = {
+    "tibia": (1, 20),
+    "fibula": (21, 10),
+    "femur": (31, 5),
+    "patella": (36, 5),
+    "fabella": (41, 5),
+}
 
 # TotalSegmentator's appendicular-bones task emits unsided masks, while an
 # existing REPAIR postprocessing step may replace them with sided masks.
@@ -32,7 +43,106 @@ DEFAULT_MASK_FILENAMES: dict[str, tuple[str, ...]] = {
     "fibula": ("fibula.nii.gz", "fibula_left.nii.gz", "fibula_right.nii.gz"),
     "femur": ("femur.nii.gz", "femur_left.nii.gz", "femur_right.nii.gz"),
     "patella": ("patella.nii.gz", "patella_left.nii.gz", "patella_right.nii.gz"),
+    "fabella": ("fabella.nii.gz", "fabella_left.nii.gz", "fabella_right.nii.gz"),
 }
+
+
+def build_named_segmentations(
+    instances: np.ndarray,
+    assignments: Mapping[str, Mapping[str, Any]],
+    laterality: str,
+) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    """Convert postprocessed instances to the KOMO named-mask convention.
+
+    The largest instance for each bone keeps the base name (for example
+    ``tibia_L.nii.gz``). Remaining instances are numbered by decreasing size
+    as ``tibia_L_fragment_1.nii.gz`` and so on.  Every named mask uses 255 as
+    foreground, matching ``all_komo_cases.zip``.
+    """
+
+    side = str(laterality).strip().upper()
+    if side not in {"L", "R"}:
+        raise ValueError(f"laterality must be L or R, got {laterality!r}")
+
+    instance_array = _validate_instance_chunk(np.asarray(instances))
+    grouped: dict[str, list[tuple[int, int]]] = {bone: [] for bone in BONE_ORDER}
+    present_ids, present_counts = np.unique(
+        instance_array[instance_array > 0], return_counts=True
+    )
+    for raw_id, raw_count in zip(present_ids, present_counts):
+        instance_id = int(raw_id)
+        assignment = assignments.get(str(instance_id))
+        if assignment is None:
+            raise ValueError(f"post-processing has no bone assignment for instance {instance_id}")
+        bone = str(assignment.get("bone", "unknown")).lower()
+        if bone not in BONE_LABEL_BLOCKS:
+            raise ValueError(
+                f"instance {instance_id} has no usable bone name after post-processing: {bone}"
+            )
+        grouped[bone].append((instance_id, int(raw_count)))
+
+    named_masks: dict[str, np.ndarray] = {}
+    aggregate = np.zeros(instance_array.shape, dtype=np.uint8)
+    for bone in BONE_ORDER:
+        ranked = sorted(grouped[bone], key=lambda item: (-item[1], item[0]))
+        block_start, capacity = BONE_LABEL_BLOCKS[bone]
+        if len(ranked) > capacity:
+            raise ValueError(
+                f"post-processing assigned {len(ranked)} {bone} instances; "
+                f"the case format supports {capacity}"
+            )
+        for rank, (instance_id, _count) in enumerate(ranked):
+            stem = f"{bone}_{side}" if rank == 0 else f"{bone}_{side}_fragment_{rank}"
+            mask = instance_array == instance_id
+            named_masks[f"{stem}.nii.gz"] = mask.astype(np.uint8) * 255
+            aggregate[mask] = block_start + rank
+
+    if not named_masks:
+        raise ValueError("post-processing produced no named bone segmentations")
+    return named_masks, aggregate
+
+
+def export_named_segmentations(
+    instance_path: str | Path,
+    report: Mapping[str, Any],
+    output_dir: str | Path,
+    laterality: str,
+    *,
+    aggregate_filename: str = "seg.nii.gz",
+) -> tuple[list[Path], Path]:
+    """Write named binary masks plus a bone-aware aggregate label map."""
+
+    reference = nib.load(str(instance_path))
+    instances = np.rint(np.asanyarray(reference.dataobj)).astype(np.int64)
+    assignments = report.get("instances")
+    if not isinstance(assignments, Mapping):
+        raise ValueError("post-processing report does not contain instance assignments")
+    named_masks, aggregate = build_named_segmentations(
+        instances, assignments, laterality
+    )
+
+    root = Path(output_dir)
+    segmentation_dir = root / "segmentations"
+    segmentation_dir.mkdir(parents=True, exist_ok=True)
+    for stale in segmentation_dir.glob("*.nii.gz"):
+        stale.unlink()
+
+    written: list[Path] = []
+    for filename, mask in named_masks.items():
+        header = reference.header.copy()
+        header.set_data_dtype(np.uint8)
+        path = segmentation_dir / filename
+        nib.save(nib.Nifti1Image(mask, reference.affine, header), str(path))
+        written.append(path)
+
+    aggregate_header = reference.header.copy()
+    aggregate_header.set_data_dtype(np.uint8)
+    aggregate_path = root / aggregate_filename
+    nib.save(
+        nib.Nifti1Image(aggregate, reference.affine, aggregate_header),
+        str(aggregate_path),
+    )
+    return sorted(written), aggregate_path
 
 
 @dataclass(frozen=True)
