@@ -65,6 +65,14 @@ def test_real_constructor_records_checkpoint_arguments(
                     "spacing": [0.5, 0.5, 0.5],
                     "patch_size": [8, 8, 8],
                     "preprocessor_name": FORMAL_PREPROCESSOR,
+                    "architecture": {
+                        "network_class_name": (
+                            "dynamic_network_architectures.architectures."
+                            "residual_unet.ResidualEncoderUNet"
+                        ),
+                        "arch_kwargs": {},
+                        "_kw_requires_import": [],
+                    },
                 }
             },
         }
