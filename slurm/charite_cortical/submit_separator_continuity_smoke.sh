@@ -16,7 +16,7 @@ if [[ -n "$dependency" ]]; then
     test_submit_args+=(--dependency="$dependency")
 fi
 test_job="$(sbatch "${test_submit_args[@]}" slurm/charite_cortical/test_separator_continuity.slurm)"
-smoke_job="$(sbatch --parsable \
+smoke_job="$(python -m tools.charite_cortical.submit_a100 --parsable \
     --dependency="afterany:$test_job" \
     --export="$common" \
     slurm/charite_cortical/train_separator_continuity_smoke.slurm)"

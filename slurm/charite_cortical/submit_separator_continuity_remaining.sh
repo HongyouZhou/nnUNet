@@ -24,12 +24,12 @@ PY
 
 cd "$repo_dir"
 git pull --ff-only
-sbatch --export=ALL,CORTICAL_ARM=matched_base "$job_file"
+python -m tools.charite_cortical.submit_a100 --export=ALL,CORTICAL_ARM=matched_base "$job_file"
 
 if gate_passed "$CORTICAL_CONTINUITY_GATE"; then
-    sbatch --export=ALL,CORTICAL_ARM=continuity "$job_file"
+    python -m tools.charite_cortical.submit_a100 --export=ALL,CORTICAL_ARM=continuity "$job_file"
     if gate_passed "$CORTICAL_DENSITY_GATE"; then
-        sbatch --export=ALL,CORTICAL_ARM=continuity_density "$job_file"
+        python -m tools.charite_cortical.submit_a100 --export=ALL,CORTICAL_ARM=continuity_density "$job_file"
     else
         echo "Density increment failed its pilot gate; folds 2-4 not submitted"
     fi

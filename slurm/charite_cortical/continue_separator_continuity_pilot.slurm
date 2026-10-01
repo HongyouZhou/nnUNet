@@ -41,7 +41,7 @@ if (( attempt >= max_attempts )); then
 fi
 
 next_attempt="$((attempt + 1))"
-retry_job="$(sbatch --parsable \
+retry_job="$(python -m tools.charite_cortical.submit_a100 --parsable \
     --array="${missing}%4" \
     --mem=128G \
     --export=ALL,PROJECT_HOME="$PROJECT_HOME",CORTICAL_REPO_DIR="$repo_dir" \

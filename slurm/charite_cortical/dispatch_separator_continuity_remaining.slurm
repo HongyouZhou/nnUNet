@@ -34,11 +34,11 @@ IFS=',' read -r -a arms <<< "$selected_arms"
 merge_jobs=()
 for arm in "${arms[@]}"; do
     common="ALL,PROJECT_HOME=$PROJECT_HOME,CORTICAL_REPO_DIR=$repo_dir,CORTICAL_DAG_RUN_DIR=$CORTICAL_DAG_RUN_DIR,CORTICAL_ARM=$arm"
-    train_job="$(sbatch --parsable \
+    train_job="$(python -m tools.charite_cortical.submit_a100 --parsable \
         --mem=128G \
         --export="$common" \
         slurm/charite_cortical/train_separator_continuity_remaining.slurm)"
-    infer_job="$(sbatch --parsable \
+    infer_job="$(python -m tools.charite_cortical.submit_a100 --parsable \
         --dependency="afterok:$train_job" \
         --array=2-4%3 \
         --export="$common" \

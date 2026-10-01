@@ -7,7 +7,7 @@ repo_dir="${CORTICAL_REPO_DIR:-$PROJECT_HOME/dev/nnUNet}"
 common="ALL,PROJECT_HOME=$PROJECT_HOME,CORTICAL_REPO_DIR=$repo_dir,CORTICAL_DAG_RUN_DIR=$CORTICAL_DAG_RUN_DIR"
 
 cd "$repo_dir"
-infer_job="$(sbatch --parsable --export="$common" slurm/charite_cortical/infer_separator_continuity.slurm)"
+infer_job="$(python -m tools.charite_cortical.submit_a100 --parsable --export="$common" slurm/charite_cortical/infer_separator_continuity.slurm)"
 post_job="$(sbatch --parsable --dependency="afterok:$infer_job" --export="$common" slurm/charite_cortical/postprocess_evaluate_separator_continuity.slurm)"
 gate_job="$(sbatch --parsable --dependency="afterok:$post_job" --export="$common" slurm/charite_cortical/gate_separator_continuity_pilot.slurm)"
 dispatch_job="$(sbatch --parsable --dependency="afterok:$gate_job" --export="$common" slurm/charite_cortical/dispatch_separator_continuity_remaining.slurm)"

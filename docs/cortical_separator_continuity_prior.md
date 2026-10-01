@@ -58,6 +58,14 @@ the finest output; deep-supervision branches retain Dice+CE.
 
 ## HPC workflow
 
+GPU submission helpers compare Slurm start estimates for all A100 nodes. The
+`gpu` candidate accepts PCIe 40/80 GB devices; the `pgpu` candidate accepts SXM4
+40/80 GB devices and groups independent one-GPU tasks to satisfy the site's
+minimum of two GPUs per allocation. Each model still uses one GPU and the
+original per-model CPU/memory allocation. Array concurrency is not increased.
+Non-A100 nodes are excluded from the live inventory. Start estimates are
+advisory; actual GPU models must be recorded when interpreting throughput.
+
 Commit and push local changes first. On HPC, the scripts use a fixed checkout
 and `git pull --ff-only`; do not edit the HPC checkout directly.
 

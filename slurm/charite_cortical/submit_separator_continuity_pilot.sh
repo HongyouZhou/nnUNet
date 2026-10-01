@@ -31,4 +31,4 @@ if [[ -n "$(squeue -h -j "$legacy_job_id" -t PENDING 2>/dev/null)" ]]; then
     echo "Cancelled pending legacy array 10246333_[0-3]"
 fi
 
-sbatch slurm/charite_cortical/train_separator_continuity_pilot.slurm
+python -m tools.charite_cortical.submit_a100 slurm/charite_cortical/train_separator_continuity_pilot.slurm

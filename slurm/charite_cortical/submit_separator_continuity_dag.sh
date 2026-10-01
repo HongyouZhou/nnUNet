@@ -85,7 +85,7 @@ python -m tools.charite_cortical.continuity_workflow init-run \
     --results-root "$results_root" >/dev/null
 
 if [[ -z "$pilot_job" ]]; then
-    pilot_job="$(sbatch --parsable \
+    pilot_job="$(python -m tools.charite_cortical.submit_a100 --parsable \
         --mem=128G \
         --export=ALL,PROJECT_HOME="$PROJECT_HOME",CORTICAL_REPO_DIR="$repo_dir" \
         slurm/charite_cortical/train_separator_continuity_pilot.slurm)"
