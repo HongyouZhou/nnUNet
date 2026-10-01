@@ -76,6 +76,10 @@ recorded but never blocks preprocessing or the pilot. The smoke runs two full
 fold-0 epochs for each arm in separate output folders: epoch 0 absorbs Torch
 compile, and epoch 1 must finish within 120 seconds. It never submits the
 formal pilot automatically.
+Smoke checkpoints are isolated under `<smoke-run-dir>/results`, so a fresh run
+can be submitted without overwriting an earlier attempt. Smoke includes normal
+per-epoch validation but skips the CLI's subsequent full-volume validation
+export; formal OOF inference remains a separate stage.
 The pilot is a one-GPU
 `0-5%4` array with folds 0/1 for matched baseline, continuity, and
 continuity+density; `--c` resumes a 48-hour task from its periodic checkpoint.

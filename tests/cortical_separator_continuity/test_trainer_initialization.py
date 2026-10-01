@@ -22,6 +22,7 @@ from nnunetv2.training.cortical_separator_continuity.trainer import (
     nnUNetTrainerCorticalSeparatorContinuitySmoke,
     nnUNetTrainerCorticalSeparatorContinuityDensityPriorSmoke,
 )
+from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 
 
 @pytest.mark.parametrize(
@@ -106,3 +107,11 @@ def test_real_constructor_records_checkpoint_arguments(
     assert trainer.save_every == save_every
     assert trainer.network is None
     assert (trainer.density_calibration is not None) == bool(trainer.density_weight)
+    if epochs == 2:
+        def unexpected_full_volume_export(*args, **kwargs):
+            pytest.fail("Performance smoke must not run whole-volume inference")
+
+        monkeypatch.setattr(
+            nnUNetTrainer, "perform_actual_validation", unexpected_full_volume_export
+        )
+        trainer.perform_actual_validation(save_probabilities=True)

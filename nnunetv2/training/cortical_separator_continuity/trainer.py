@@ -420,6 +420,12 @@ class _CorticalSeparatorSmokeMixin:
         self.num_epochs = 2
         self.save_every = 1
 
+    def perform_actual_validation(self, save_probabilities: bool = False):
+        # The CLI normally exports every validation case after training. Smoke
+        # already runs the same per-epoch validation as the formal trainers;
+        # whole-volume inference belongs to the separate OOF stage.
+        self.print_to_log_file("Performance smoke complete; skipping full-volume export")
+
 
 class nnUNetTrainerCorticalSeparatorMatchedBaseSmoke(
     _CorticalSeparatorSmokeMixin, nnUNetTrainerCorticalSeparatorMatchedBase
