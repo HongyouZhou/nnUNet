@@ -406,8 +406,17 @@ def _assert_joint_nearest_spatial_transform(training_transforms) -> None:
 class _CorticalSeparatorSmokeMixin:
     """Compile warm-up plus one measured epoch in a separate output folder."""
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device = torch.device("cuda"),
+    ) -> None:
+        # nnUNetTrainer inspects the concrete constructor to record checkpoint
+        # arguments. A variadic signature fails before any training starts.
+        super().__init__(plans, configuration, fold, dataset_json, device)
         self.num_epochs = 2
         self.save_every = 1
 

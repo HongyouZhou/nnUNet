@@ -9,7 +9,7 @@ dependency="${CORTICAL_SMOKE_DEPENDENCY:-}"
 
 cd "$repo_dir"
 revision="$(git rev-parse HEAD)"
-common="ALL,PROJECT_HOME=$PROJECT_HOME,CORTICAL_REPO_DIR=$repo_dir,CORTICAL_SMOKE_RUN_DIR=$run_dir,CORTICAL_CODE_REVISION=$revision"
+common="ALL,PROJECT_HOME=$PROJECT_HOME,CORTICAL_REPO_DIR=$repo_dir,CORTICAL_SMOKE_RUN_DIR=$run_dir,CORTICAL_CODE_REVISION=$revision,nnUNet_results=$run_dir/results"
 mkdir -p "$run_dir" logs
 test_submit_args=(--parsable --export="$common")
 if [[ -n "$dependency" ]]; then
