@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=128G
 #SBATCH --time=24:00:00
 #SBATCH --array=0-5%4
 #SBATCH --output=logs/%x-%A_%a.out
@@ -24,6 +24,9 @@ export nnUNet_raw="${nnUNet_raw:-$PROJECT_HOME/dev/data/nnUNet_raw}"
 export nnUNet_preprocessed="${nnUNet_preprocessed:-$PROJECT_HOME/dev/data/nnUNet_preprocessed}"
 export nnUNet_results="${nnUNet_results:-$PROJECT_HOME/dev/data/nnUNet_results}"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# Full-volume preprocessing and probability export exceeded 64 GiB in the
+# pilot. Keep one worker for each stage and reserve 128 GiB per GPU task.
+export PYTHONUNBUFFERED=1
 export nnUNet_npp=1
 export nnUNet_nps=1
 export OMP_NUM_THREADS=1
