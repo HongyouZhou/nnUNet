@@ -163,3 +163,13 @@ minimum-maximum watershed barrier. GT cortical instances are opened only by
 the evaluation job. Every job ID is recorded in `<run-dir>/jobs.json`; metrics,
 gate decisions, predictions, and final summary remain under the same run
 directory.
+
+Probability NPZ files remain in the image reader's coordinate system, while
+the NIfTI segmentation has already been restored to its native orientation.
+Postprocessing uses the companion export pickle's original and reoriented
+affines to restore the separator probabilities, including axis permutations
+and flips. Matching array shapes alone does not establish alignment. Fold
+metrics record `probability_grid_restoration` in their postprocess contract
+so results produced before this correction cannot be merged with corrected
+results. Existing affected instance outputs and metrics must be archived and
+regenerated; trained models and probability predictions remain reusable.

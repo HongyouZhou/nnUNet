@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pickle
 import re
 import tempfile
 from pathlib import Path
@@ -300,19 +301,48 @@ def stage_fold_inputs(dataset: Path, fold: int, output: Path) -> list[str]:
     return identifiers
 
 
-def _load_probability_channel(npz_path: Path, reference_shape: tuple[int, ...], channel: int) -> np.ndarray:
+def _load_probability_channel(
+    npz_path: Path, reference_image: nib.Nifti1Image, channel: int
+) -> np.ndarray:
+    """Restore nnU-Net's reader-space probabilities to the native NIfTI grid.
+
+    Unlike the exported segmentation, the NPZ has not passed through the
+    image writer. For NibabelIOWithReorient it is still canonical RAS in ZYX
+    order, including when native and canonical shapes happen to be equal.
+    Use the export sidecar's affines, never shape matching, to invert this.
+    """
+    with npz_path.with_suffix(".pkl").open("rb") as stream:
+        properties = pickle.load(stream)
+    geometry = properties.get("nibabel_stuff", {})
+    if "original_affine" not in geometry:
+        raise ValueError(f"Missing Nibabel export geometry for {npz_path}")
+    original_affine = np.asarray(geometry["original_affine"])
+    if not np.allclose(original_affine, reference_image.affine):
+        raise ValueError(f"Probability and semantic original affines differ: {npz_path}")
     with np.load(npz_path) as archive:
         probabilities = archive[
             "probabilities" if "probabilities" in archive.files else archive.files[0]
         ]
-    if probabilities.ndim != 4 or channel >= probabilities.shape[0]:
+    if probabilities.ndim != 4 or not 0 <= channel < probabilities.shape[0]:
         raise ValueError(f"Invalid probability tensor {probabilities.shape} in {npz_path}")
-    value = np.asarray(probabilities[channel], dtype=np.float32)
-    if value.shape != reference_shape:
-        value = np.transpose(value, (2, 1, 0))
-    if value.shape != reference_shape:
+    value = np.array(probabilities[channel], dtype=np.float32, copy=True)
+    del probabilities
+    value = value.transpose((2, 1, 0))
+    if "reoriented_affine" in geometry:
+        from_canonical = nib.orientations.ornt_transform(
+            nib.orientations.axcodes2ornt("RAS"),
+            nib.orientations.io_orientation(original_affine),
+        )
+        restored = nib.Nifti1Image(
+            value, geometry["reoriented_affine"]
+        ).as_reoriented(from_canonical)
+        if not np.allclose(restored.affine, reference_image.affine):
+            raise ValueError(f"Restored probability affine differs from semantic grid: {npz_path}")
+        value = np.asanyarray(restored.dataobj)
+    if value.shape != reference_image.shape:
         raise ValueError(
-            f"Probability shape {probabilities[channel].shape} cannot match {reference_shape}"
+            f"Restored probability shape {value.shape} differs from semantic grid "
+            f"{reference_image.shape}: {npz_path}"
         )
     if not np.isfinite(value).all() or np.any((value < 0) | (value > 1)):
         raise ValueError(f"Separator probabilities are not finite values in [0,1]: {npz_path}")
@@ -458,7 +488,7 @@ def postprocess_evaluate_fold(
             raise FileNotFoundError(f"Missing OOF prediction for {identifier} in {prediction_dir}")
         semantic_image = nib.load(str(semantic_path))
         semantic = np.rint(np.asanyarray(semantic_image.dataobj)).astype(np.int16)
-        probability = _load_probability_channel(probability_path, semantic.shape, 2)
+        probability = _load_probability_channel(probability_path, semantic_image, 2)
         instances = minimax_watershed_instances(
             semantic,
             probability,
@@ -501,12 +531,16 @@ def postprocess_evaluate_fold(
                 **metrics,
             }
         )
+        print(f"[POST] {arm} fold={fold} {len(records)}/{len(identifiers)} {identifier}", flush=True)
     result = {
         "schema_version": SCHEMA_VERSION,
         "kind": "separator_continuity_fold_metrics",
         "arm": arm,
         "fold": int(fold),
-        "postprocess_contract": dict(contract),
+        "postprocess_contract": {
+            **dict(contract),
+            "probability_grid_restoration": "native_nifti_from_export_affines_v1",
+        },
         "records": records,
     }
     _write_json_atomic(output_json, result)
