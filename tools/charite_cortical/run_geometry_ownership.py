@@ -135,18 +135,26 @@ def ownership_evaluation(predicted, gt, validity, pairs, spacing):
         others = np.argwhere((gt > 0) & (gt != child["gt_id"]))
         if len(points) < 100 or not len(others):
             continue
-        candidates = points[np.linspace(0, len(points) - 1, min(1000, len(points))).astype(int)]
+        radius = 8.0
+        # A far-away point often lies at the scan end. Exclude that confound:
+        # the entire control sphere and CT tensor context must fit in the scan.
+        scan_margin = radius + 4 * (GeometryConfig().derivative_mm + GeometryConfig().context_tensor_mm)
+        boundary_distance = np.minimum(points * spacing, (np.asarray(gt.shape) - 1 - points) * spacing)
+        interior = points[np.all(boundary_distance >= scan_margin, axis=1)]
+        if not len(interior):
+            continue
+        candidates = interior[np.linspace(0, len(interior) - 1, min(1000, len(interior))).astype(int)]
         distance, _ = cKDTree(others * spacing).query(candidates * spacing)
         index = int(np.argmax(distance))
         if distance[index] < 10:
             continue
         center = candidates[index]
-        radius = 8.0
         local = np.linalg.norm((points - center) * spacing, axis=1) <= radius
         labels, counts = np.unique(pred[tuple(points[local].T)], return_counts=True)
         substantial = labels[counts / counts.sum() >= 0.1]
         controls.append(dict(gt_id=child["gt_id"], native_center=center.tolist(), radius_mm=radius,
                              nearest_other_instance_mm=float(distance[index]), covered_voxels=int(local.sum()),
+                             minimum_scan_boundary_distance_mm=float(np.min(boundary_distance[np.all(points == center, axis=1)])),
                              substantial_predictions=substantial.tolist(), false_split=bool(len(substantial) > 1),
                              interpretation="same-annotation region; proxy control, not clinically verified intact cortex"))
     return dict(children=children, touching_mixed_marker_pairs=pair_records, same_instance_controls=controls)
