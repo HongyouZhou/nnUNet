@@ -14,7 +14,7 @@ from pathlib import Path
 
 import nibabel as nib
 import numpy as np
-from scipy.ndimage import label
+from scipy.ndimage import find_objects, label
 from skimage.segmentation import watershed
 
 from tools.charite_cortical.continuity_workflow import (
@@ -32,6 +32,25 @@ TASKS = tuple(("matched_base", fold) for fold in range(5)) + (
 CONNECTIVITY = np.ones((3, 3, 3), dtype=bool)
 
 
+def _add_fallback_markers(markers, components, count, probability, next_id):
+    """Same C-order minimum as the frozen loop, without whole-volume rescans."""
+    seeded = set(int(value) for value in np.unique(components[markers > 0]))
+    missing = [value for value in range(1, count + 1) if value not in seeded]
+    if not missing:
+        return 0
+    bounds = find_objects(components, max_label=count)
+    for component_id in missing:
+        region = bounds[component_id - 1]
+        local = components[region] == component_id
+        indices = np.flatnonzero(local)
+        seed = indices[int(np.argmin(probability[region].ravel()[indices]))]
+        coordinate = np.unravel_index(seed, local.shape)
+        coordinate = tuple(int(value + extent.start) for value, extent in zip(coordinate, region))
+        markers[coordinate] = next_id
+        next_id += 1
+    return len(missing)
+
+
 def separator_markers(union, probability, threshold=0.5, minimum_seed_voxels=10):
     """Reproduce the frozen postprocessor's markers, including fallback seeds."""
     markers, _ = label(union & (probability < threshold), structure=CONNECTIVITY)
@@ -41,24 +60,14 @@ def separator_markers(union, probability, threshold=0.5, minimum_seed_voxels=10)
     markers[~keep[markers]] = 0
     markers, _ = label(markers > 0, structure=CONNECTIVITY)
     components, count = label(union, structure=CONNECTIVITY)
-    next_id = int(markers.max()) + 1
-    fallback_count = 0
-    for component_id in range(1, count + 1):
-        component = components == component_id
-        if np.any(markers[component] > 0):
-            continue
-        indices = np.flatnonzero(component)
-        seed = indices[int(np.argmin(probability.ravel()[indices]))]
-        markers.ravel()[seed] = next_id
-        next_id += 1
-        fallback_count += 1
+    fallback_count = _add_fallback_markers(markers, components, count, probability, int(markers.max()) + 1)
     return markers, components, fallback_count
 
 
-def _overlap_table(gt, labels, gt_ids):
+def _overlap_table(positions, labels):
     table = {}
-    for gt_id in gt_ids:
-        values, counts = np.unique(labels[gt == gt_id], return_counts=True)
+    for gt_id, indices in positions.items():
+        values, counts = np.unique(labels.ravel()[indices], return_counts=True)
         table[int(gt_id)] = {
             int(value): int(count) for value, count in zip(values, counts) if value > 0
         }
@@ -76,6 +85,14 @@ def _mixed_regions(table, sizes, minimum_fraction=0.1):
 
 def touching_pairs(gt):
     """Count annotation contacts using the same 26-neighbour convention."""
+    extents = []
+    positive = gt > 0
+    for axis in range(3):
+        indices = np.flatnonzero(positive.any(axis=tuple(a for a in range(3) if a != axis)))
+        if not len(indices):
+            return {}
+        extents.append(slice(int(indices[0]), int(indices[-1]) + 1))
+    gt = gt[tuple(extents)]
     contacts = {}
     for offset in itertools.product((-1, 0, 1), repeat=3):
         if offset <= (0, 0, 0):
@@ -100,12 +117,15 @@ def diagnose_arrays(semantic, probability, predicted, gt_instances, validity):
     union = np.isin(semantic, (1, 2))
     if not np.array_equal(predicted > 0, union):
         raise ValueError("Saved postprocessing does not exactly cover the predicted cortical union")
-    ids = [int(value) for value in np.unique(gt) if value > 0]
-    sizes = {value: int(np.count_nonzero(gt == value)) for value in ids}
+    indices = np.flatnonzero(gt)
+    ownership = gt.ravel()[indices]
+    ids = [int(value) for value in np.unique(ownership)]
+    positions = {value: indices[ownership == value] for value in ids}
+    sizes = {value: len(positions[value]) for value in ids}
     markers, components, fallback_count = separator_markers(union, probability)
-    seed_table = _overlap_table(gt, markers, ids)
-    component_table = _overlap_table(gt, components, ids)
-    instance_table = _overlap_table(gt, np.where(semantic_valid, predicted, 0), ids)
+    seed_table = _overlap_table(positions, markers)
+    component_table = _overlap_table(positions, components)
+    instance_table = _overlap_table(positions, np.where(semantic_valid, predicted, 0))
     mixed_seeds = _mixed_regions(seed_table, sizes)
     mixed_components = _mixed_regions(component_table, sizes)
     mixed_instances = _mixed_regions(instance_table, sizes)
@@ -195,15 +215,7 @@ def oracle_seed_partition(semantic, probability, gt_instances, validity, seed_fr
         selected = np.argpartition(probability.ravel()[indices], count - 1)[:count]
         markers.ravel()[indices[selected]] = gt_id
     components, count = label(union, structure=CONNECTIVITY)
-    next_id = int(gt.max()) + 1
-    for component_id in range(1, count + 1):
-        component = components == component_id
-        if np.any(markers[component] > 0):
-            continue
-        indices = np.flatnonzero(component)
-        seed = indices[int(np.argmin(probability.ravel()[indices]))]
-        markers.ravel()[seed] = next_id
-        next_id += 1
+    _add_fallback_markers(markers, components, count, probability, int(gt.max()) + 1)
     result = watershed(probability, markers=markers, mask=union, connectivity=CONNECTIVITY, watershed_line=False)
     return markers, np.asarray(result, dtype=np.int32)
 
@@ -265,7 +277,7 @@ def inspect_case(dataset, run_dir, output, arm, fold, case):
                 mask = plane(fields["gt_instances"]) == gt_id
                 if mask.any() and (~mask).any():
                     panel.contour(mask, levels=[0.5], colors=color, linewidths=0.9, origin="lower", extent=extent)
-            panel.set_title(f"{row_names[row]} | native axis {axis} ({orientations[axis]})")
+            panel.set_title(f"{row_names[row]}\nnative axis {axis} ({orientations[axis]})", fontsize=10)
             panel.set_xlabel("mm")
             panel.set_ylabel("mm")
     figure.suptitle(f"{case} / {arm}: GT {first}=cyan, {second}=green; seed outline=yellow\nGT-assisted experiment is diagnostic only; frozen recovery {diagnosis['metrics']['child_recovery_fraction']:.1%} -> oracle seeds {oracle_metrics['child_recovery_fraction']:.1%}")
@@ -298,13 +310,23 @@ def diagnose_fold(dataset, run_dir, output, arm, fold):
     source = json.loads((run_dir / "artifacts" / arm / f"fold_{fold}" / "metrics.json").read_text())
     expected = {record["case_id"]: record for record in source["records"]}
     for index, case in enumerate(cases):
+        destination = output / arm / f"fold_{fold}" / f"{case}.json"
+        if destination.exists():
+            record = json.loads(destination.read_text())
+            if record.get("case_id") != case or record.get("arm") != arm or record.get("fold") != fold:
+                raise ValueError(f"Existing diagnostic has a different case contract: {destination}")
+            for key, value in record["metrics"].items():
+                if not np.isclose(value, expected[case][key], rtol=0, atol=1e-10):
+                    raise ValueError(f"Existing diagnostic metric changed: {case}/{key}")
+            print(f"[DIAG] resume {arm}/{fold} {index+1}/{len(cases)} {case}", flush=True)
+            continue
         _, crop, arrays = load_case(dataset, run_dir, arm, fold, case)
         record = diagnose_arrays(**arrays)
         for key, value in record["metrics"].items():
             if not np.isclose(value, expected[case][key], rtol=0, atol=1e-10):
                 raise ValueError(f"Diagnostic metrics changed: {case}/{key}")
         record.update(case_id=case, arm=arm, fold=fold, crop_start=[s.start for s in crop])
-        _write_json_atomic(output / arm / f"fold_{fold}" / f"{case}.json", record)
+        _write_json_atomic(destination, record)
         print(f"[DIAG] {arm}/{fold} {index+1}/{len(cases)} {case} mixed={record['mixed_marker_count']} coverage_limited={record['coverage_limited_child_count']}", flush=True)
     _write_json_atomic(output / arm / f"fold_{fold}" / "complete.json", {"cases": cases})
 

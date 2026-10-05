@@ -46,6 +46,16 @@ def test_marker_reconstruction_matches_frozen_postprocessor_with_fallback():
     np.testing.assert_array_equal(reconstructed, minimax_watershed_instances(semantic, probability))
 
 
+def test_sparse_fallback_and_marker_numbering_match_frozen_watershed():
+    rng = np.random.default_rng(778)
+    for _ in range(12):
+        union = rng.random((9, 8, 7)) > 0.8
+        probability = rng.random(union.shape).astype(np.float32)
+        markers, _, _ = separator_markers(union, probability)
+        reconstructed = watershed(probability, markers=markers, mask=union, connectivity=np.ones((3, 3, 3)), watershed_line=False)
+        np.testing.assert_array_equal(reconstructed, minimax_watershed_instances(union.astype(np.int16), probability))
+
+
 def test_invalid_ownership_does_not_create_a_false_mixed_seed():
     gt, semantic, probability, validity = _case()
     validity[gt == 2] = 1

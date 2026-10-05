@@ -173,3 +173,17 @@ metrics record `probability_grid_restoration` in their postprocess contract
 so results produced before this correction cannot be merged with corrected
 results. Existing affected instance outputs and metrics must be archived and
 regenerated; trained models and probability predictions remain reusable.
+
+## Completed screening and next stage (2026-10-05)
+
+The matched baseline finished five-fold OOF evaluation on all 68 cases:
+cortical-union Dice 0.7838108, patient-macro child recovery 0.1783685,
+all-child recovery 0/68, and patient-macro child false-split rate 0.0119048.
+There are 517 relation-valid cortical children, of which 78 reach one-to-one
+IoU 0.5 recovery. The pooled 78/517 rate differs from the patient-macro metric.
+
+Both two-fold loss increment gates rejected expansion because complete-child
+recovery gain was zero. These gates apply to the local loss ablations above;
+they do not reject the original cortical-geometric-continuity idea. The next
+stage is frozen-prediction coverage/seed diagnosis and a cortical ownership
+mechanism test, described in [cortical_geometry_diagnosis.md](cortical_geometry_diagnosis.md).

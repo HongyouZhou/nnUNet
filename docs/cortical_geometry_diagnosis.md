@@ -22,6 +22,11 @@ does not invalidate the original cortical instance task. The current mechanism
 gap is that postprocessing cannot use independent cortical ownership evidence
 to reconsider fragments already merged into one marker.
 
+The CT network may still learn implicit geometric information. The absence of
+an explicit surface-ownership mechanism is not evidence that it learns no
+geometry, and the frozen implementation is not a coding error merely because
+it tests a narrower surrogate.
+
 ## Frozen-result diagnosis
 
 Run `tools.charite_cortical.diagnose_continuity` with
@@ -93,3 +98,25 @@ both connected fragments that should split and normal continuous cortex that
 should remain intact, plus small/thin fragments. Whole-case all-child recovery
 alone is too coarse to diagnose this mechanism; report per-pair split success,
 child recovery and false splits together.
+
+## Additional loss-representation audit
+
+The current pair generator includes same-instance pairs whose endpoints are
+semantic separator voxels. For instance IDs `[A, A, B, B]`, a perfect semantic
+separator field `[0, 1, 1, 0]` gives local maximum-barrier scores `[1, 1, 1]`.
+The instance-relation cut targets are `[0, 1, 0]`. The two within-instance edges
+therefore oppose the semantic separator target. This is an objective tension
+for that arrangement, not evidence of a particular contribution to actual
+training failure. Its frequency on augmented training samples has not yet
+been measured.
+
+An independently predicted directional edge relation can represent `[0, 1, 0]`
+without forcing the separator voxel probability to zero. This is a candidate
+representation for the next mechanism test, rather than another increase in
+the weight of the same maximum-voxel-probability surrogate.
+
+Neither local smoothness nor high HU should become an unconditional must-link:
+a surviving hinge can be locally smooth while the surrounding fracture and
+surface context support a global split. Reliable cortical ownership relations
+must account for that context. Similarly, a normal anatomical bend must not
+become a fracture just because curvature is high.
