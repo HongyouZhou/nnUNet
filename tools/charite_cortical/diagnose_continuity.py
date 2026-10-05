@@ -15,6 +15,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 from scipy.ndimage import label
+from skimage.segmentation import watershed
 
 from tools.charite_cortical.continuity_workflow import (
     _load_probability_channel,
@@ -177,6 +178,121 @@ def load_case(dataset, run_dir, arm, fold, case):
     return reference, crop, arrays
 
 
+def oracle_seed_partition(semantic, probability, gt_instances, validity, seed_fraction=0.1):
+    """GT-assisted counterfactual; tests separate markers, not a new algorithm."""
+    if not 0 < seed_fraction <= 1:
+        raise ValueError("Seed fraction must be in (0,1]")
+    union = np.isin(semantic, (1, 2))
+    gt = np.where((validity & 2) != 0, gt_instances, 0)
+    markers = np.zeros(gt.shape, dtype=np.int32)
+    for gt_id in np.unique(gt):
+        if gt_id == 0:
+            continue
+        indices = np.flatnonzero((gt == gt_id) & union)
+        if not len(indices):
+            continue
+        count = max(1, int(np.ceil(len(indices) * seed_fraction)))
+        selected = np.argpartition(probability.ravel()[indices], count - 1)[:count]
+        markers.ravel()[indices[selected]] = gt_id
+    components, count = label(union, structure=CONNECTIVITY)
+    next_id = int(gt.max()) + 1
+    for component_id in range(1, count + 1):
+        component = components == component_id
+        if np.any(markers[component] > 0):
+            continue
+        indices = np.flatnonzero(component)
+        seed = indices[int(np.argmin(probability.ravel()[indices]))]
+        markers.ravel()[seed] = next_id
+        next_id += 1
+    result = watershed(probability, markers=markers, mask=union, connectivity=CONNECTIVITY, watershed_line=False)
+    return markers, np.asarray(result, dtype=np.int32)
+
+
+def inspect_case(dataset, run_dir, output, arm, fold, case):
+    """Export three-plane CT evidence plus a labelled oracle-seed ablation."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from scipy.ndimage import binary_dilation
+
+    reference, crop, arrays = load_case(dataset, run_dir, arm, fold, case)
+    diagnosis = json.loads((output / arm / f"fold_{fold}" / f"{case}.json").read_text())
+    markers, _, _ = separator_markers(np.isin(arrays["semantic"], (1, 2)), arrays["probability"])
+    oracle_markers, oracle = oracle_seed_partition(arrays["semantic"], arrays["probability"], arrays["gt_instances"], arrays["validity"])
+    oracle_metrics = evaluate_instances(oracle, np.isin(arrays["semantic"], (1, 2)), arrays["gt_instances"], arrays["validity"])
+    candidate = next((pair for pair in diagnosis["touching_gt_pairs"] if pair["shared_substantial_markers"]), None)
+    if candidate is None:
+        raise ValueError(f"No touching mixed-seed pair for {case}; choose a different diagnostic case")
+    first, second = candidate["gt_ids"]
+    interface = binary_dilation(arrays["gt_instances"] == first, structure=CONNECTIVITY) & (arrays["gt_instances"] == second)
+    interface &= np.isin(markers, candidate["shared_substantial_markers"])
+    points = np.argwhere(interface)
+    middle = np.median(points, axis=0)
+    center = points[np.argmin(np.sum((points - middle) ** 2, axis=1))]
+    image = nib.load(str(dataset / "imagesTr" / f"{case}_0000.nii.gz"))
+    if image.shape != reference.shape or not np.allclose(image.affine, reference.affine):
+        raise ValueError("CT does not share the native prediction grid")
+    spacing = np.asarray(reference.header.get_zooms()[:3])
+    radius = np.ceil(25 / spacing).astype(int)
+    local = tuple(slice(max(0, int(c - r)), min(n, int(c + r + 1))) for c, r, n in zip(center, radius, arrays["semantic"].shape))
+    native = tuple(slice(s.start + offset.start, s.stop + offset.start) for s, offset in zip(local, crop))
+    ct = np.asarray(image.dataobj[native], dtype=np.float32)
+    fields = {name: value[local] for name, value in arrays.items()}
+    fields.update(markers=markers[local], oracle=oracle[local], oracle_markers=oracle_markers[local])
+    local_center = center - np.array([s.start for s in local])
+    figure, axes = plt.subplots(4, 3, figsize=(12, 14))
+    row_names = ("GT ownership", "Frozen separator probability", "Frozen markers + output", "GT-assisted markers + output")
+    orientations = nib.aff2axcodes(reference.affine)
+    for axis in range(3):
+        plane = lambda value: np.take(value, int(local_center[axis]), axis=axis).T
+        other = [a for a in range(3) if a != axis]
+        extent = (0, ct.shape[other[0]] * spacing[other[0]], 0, ct.shape[other[1]] * spacing[other[1]])
+        for row in range(4):
+            panel = axes[row, axis]
+            panel.imshow(plane(ct), cmap="gray", vmin=-200, vmax=1500, origin="lower", extent=extent)
+            if row == 1:
+                values = np.ma.masked_where(~np.isin(plane(fields["semantic"]), (1, 2)), plane(fields["probability"]))
+                panel.imshow(values, cmap="magma", vmin=0, vmax=1, alpha=0.7, origin="lower", extent=extent)
+            if row in (2, 3):
+                name = "predicted" if row == 2 else "oracle"
+                values = np.ma.masked_where(plane(fields[name]) == 0, plane(fields[name]) % 20)
+                panel.imshow(values, cmap="tab20", vmin=0, vmax=20, alpha=0.65, origin="lower", extent=extent)
+                name = "markers" if row == 2 else "oracle_markers"
+                seed_plane = plane(fields[name])
+                if (seed_plane > 0).any() and (seed_plane == 0).any():
+                    panel.contour(seed_plane > 0, levels=[0.5], colors="yellow", linewidths=0.6, origin="lower", extent=extent)
+            for gt_id, color in ((first, "cyan"), (second, "lime")):
+                mask = plane(fields["gt_instances"]) == gt_id
+                if mask.any() and (~mask).any():
+                    panel.contour(mask, levels=[0.5], colors=color, linewidths=0.9, origin="lower", extent=extent)
+            panel.set_title(f"{row_names[row]} | native axis {axis} ({orientations[axis]})")
+            panel.set_xlabel("mm")
+            panel.set_ylabel("mm")
+    figure.suptitle(f"{case} / {arm}: GT {first}=cyan, {second}=green; seed outline=yellow\nGT-assisted experiment is diagnostic only; frozen recovery {diagnosis['metrics']['child_recovery_fraction']:.1%} -> oracle seeds {oracle_metrics['child_recovery_fraction']:.1%}")
+    figure.tight_layout(rect=(0, 0, 1, 0.95))
+    destination = output / "inspections" / arm / case
+    destination.mkdir(parents=True, exist_ok=True)
+    figure.savefig(destination / "ct_seed_diagnosis.png", dpi=160)
+    plt.close(figure)
+    record = {
+        "case_id": case, "arm": arm, "fold": fold, "development_only": True,
+        "counterfactual": "GT ownership supplies separate markers using the lowest-probability 10% of each covered GT instance; cortical union and separator field stay frozen.",
+        "frozen_metrics": diagnosis["metrics"], "oracle_seed_metrics": oracle_metrics,
+        "selected_pair": candidate, "native_voxel": (center + np.array([s.start for s in crop])).tolist(),
+        "world_mm": nib.affines.apply_affine(reference.affine, center + np.array([s.start for s in crop])).tolist(),
+        "ct_crop_start": [s.start for s in native], "ct_crop_shape": list(ct.shape),
+    }
+    transform = np.eye(4)
+    transform[:3, 3] = [s.start for s in native]
+    affine = reference.affine @ transform
+    for name in ("gt_instances", "predicted", "markers", "oracle", "oracle_markers"):
+        nib.save(nib.Nifti1Image(fields[name].astype(np.int32), affine), destination / f"{name}_roi.nii.gz")
+    nib.save(nib.Nifti1Image(ct, affine), destination / "ct_roi.nii.gz")
+    _write_json_atomic(destination / "inspection.json", record)
+    print(json.dumps(record, indent=2), flush=True)
+    return record
+
+
 def diagnose_fold(dataset, run_dir, output, arm, fold):
     cases = validation_case_ids(dataset, fold)
     source = json.loads((run_dir / "artifacts" / arm / f"fold_{fold}" / "metrics.json").read_text())
@@ -245,9 +361,14 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--task-id", type=int)
     parser.add_argument("--summarize", action="store_true")
+    parser.add_argument("--inspect-case")
+    parser.add_argument("--arm", default="matched_base")
+    parser.add_argument("--fold", type=int)
     args = parser.parse_args()
     if args.summarize:
         print(json.dumps(summarize(args.output), indent=2))
+    elif args.inspect_case:
+        inspect_case(args.dataset, args.run_dir, args.output, args.arm, args.fold, args.inspect_case)
     else:
         arm, fold = TASKS[args.task_id]
         diagnose_fold(args.dataset, args.run_dir, args.output, arm, fold)
