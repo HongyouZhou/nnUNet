@@ -233,6 +233,10 @@ def geometry_ownership(semantic, separator_probability, ct, spacing, config=Geom
     base = watershed(separator_probability, markers=markers, mask=union, connectivity=CONNECTIVITY, watershed_line=False).astype(np.int32)
     record = {"config": asdict(config), "algorithm": "ct_sheet_signed_graph_v1", "GT_used_for_inference": False}
     if not union.any():
+        if graph_output is not None:
+            np.savez_compressed(Path(graph_output), positions=np.empty(0, np.int64), voxel_patch=np.empty(0, np.int32),
+                                edges=np.empty((0, 2), np.int32), repulsive=np.empty(0, bool), partition=np.empty(0, np.int32),
+                                fine_angles_deg=np.empty(0), excess_deg=np.empty(0))
         return base, base.copy(), record
     positions, voxel_patch, edges, area, centers = patch_graph(base, spacing, config.patch_mm)
     count = len(centers)

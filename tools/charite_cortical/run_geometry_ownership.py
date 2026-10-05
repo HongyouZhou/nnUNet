@@ -103,7 +103,7 @@ def audit_graph(graph_path, gt, validity):
         )
 
 
-def ownership_evaluation(predicted, gt, validity, pairs, spacing):
+def ownership_evaluation(predicted, gt, validity, pairs, spacing, config=GeometryConfig()):
     """Pair separation plus same-GT regions far from other annotated pieces."""
     gt = np.where((validity & 2) != 0, gt, 0)
     pred = np.where((validity & 1) != 0, predicted, 0)
@@ -138,7 +138,7 @@ def ownership_evaluation(predicted, gt, validity, pairs, spacing):
         radius = 8.0
         # A far-away point often lies at the scan end. Exclude that confound:
         # the entire control sphere and CT tensor context must fit in the scan.
-        scan_margin = radius + 4 * (GeometryConfig().derivative_mm + GeometryConfig().context_tensor_mm)
+        scan_margin = radius + 4 * (config.derivative_mm + config.context_tensor_mm)
         boundary_distance = np.minimum(points * spacing, (np.asarray(gt.shape) - 1 - points) * spacing)
         interior = points[np.all(boundary_distance >= scan_margin, axis=1)]
         if not len(interior):
@@ -237,8 +237,8 @@ def run_case(dataset, run_dir, diagnosis, output, case, fold, config=GeometryCon
             raise AssertionError(f"Frozen baseline changed: {case}/{key}")
     if not np.isclose(metrics["cortical_union_dice"], baseline_metrics["cortical_union_dice"], atol=1e-10, rtol=0):
         raise AssertionError("Geometry changed union Dice")
-    ownership = ownership_evaluation(full_prediction, gt, validity, diagnostic["touching_gt_pairs"], spacing)
-    baseline_ownership = ownership_evaluation(full_base, gt, validity, diagnostic["touching_gt_pairs"], spacing)
+    ownership = ownership_evaluation(full_prediction, gt, validity, diagnostic["touching_gt_pairs"], spacing, config)
+    baseline_ownership = ownership_evaluation(full_base, gt, validity, diagnostic["touching_gt_pairs"], spacing, config)
     inspection = json.loads((diagnosis / "inspections" / "matched_base" / case / "inspection.json").read_text())
     inspection_figure(destination, reference, crop, ct, baseline, prediction, gt[crop], inspection, ownership["same_instance_controls"])
     record = dict(case_id=case, fold=fold, development_only=True, geometry=geometry,

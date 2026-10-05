@@ -7,7 +7,7 @@ from tools.charite_cortical.geometry_ownership import (
     GeometryConfig, constrained_partition, geometry_ownership, patch_graph,
     sheet_relations, supported_repulsion,
 )
-from tools.charite_cortical.run_geometry_ownership import audit_graph, prediction_crop, sparse_evaluation
+from tools.charite_cortical.run_geometry_ownership import audit_graph, ownership_evaluation, prediction_crop, sparse_evaluation
 
 
 def test_repulsive_ownership_survives_a_stronger_smooth_residual_bridge():
@@ -129,6 +129,26 @@ def test_graph_audit_measures_same_fragment_repulsion_without_affecting_predicti
     assert result["same_gt_repulsive_edges"] == 1
     assert result["different_gt_repulsive_edges"] == 1
     assert result["different_gt_fraction_of_audited_repulsion"] == 0.5
+
+
+def test_continuity_controls_exclude_scan_boundary_truncation():
+    gt = np.zeros((90, 90, 90), np.int16)
+    gt[10:41, 20:70, 40] = 1; gt[55:75, 20:70, 40] = 2
+    result = ownership_evaluation(gt, gt, np.full(gt.shape, 3, np.int16), [], np.ones(3))
+    controls = result["same_instance_controls"]
+    assert len(controls) == 2
+    for control in controls:
+        assert control["minimum_scan_boundary_distance_mm"] >= 8 + 4 * (0.5 + 2.7)
+        assert not control["false_split"]
+
+
+def test_empty_automatic_prediction_can_still_be_audited(tmp_path):
+    graph = tmp_path / "graph.npz"
+    zero = np.zeros((4, 4, 4), np.float32)
+    geometry_ownership(zero, zero, zero, (1, 1, 1), graph_output=graph)
+    result = audit_graph(graph, np.ones(zero.shape, np.int32), np.full(zero.shape, 3, np.int16))
+    assert result["total_edges"] == 0
+    assert result["different_gt_fraction_of_audited_repulsion"] is None
 
 
 def test_prediction_crop_depends_only_on_prediction_and_physical_context():
