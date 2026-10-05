@@ -184,6 +184,17 @@ IoU 0.5 recovery. The pooled 78/517 rate differs from the patient-macro metric.
 
 Both two-fold loss increment gates rejected expansion because complete-child
 recovery gain was zero. These gates apply to the local loss ablations above;
-they do not reject the original cortical-geometric-continuity idea. The next
-stage is frozen-prediction coverage/seed diagnosis and a cortical ownership
-mechanism test, described in [cortical_geometry_diagnosis.md](cortical_geometry_diagnosis.md).
+they do not reject the original cortical-geometric-continuity idea. The
+frozen-prediction coverage/seed diagnosis has subsequently completed all 124
+case-arm records, as described in
+[cortical_geometry_diagnosis.md](cortical_geometry_diagnosis.md).
+
+The next automatic CT-geometry ownership prototype has now also completed its
+first three selected-case tests. It enforces independent cortical direction
+constraints through residual bridges, but recovery stayed at 6/29 and false
+splits increased from 0/29 to 14/29. Thus this v1 mechanism did not pass and
+should not be expanded. Geometry direction certainty is insufficient ownership
+certainty. The implemented mechanism, artifacts and requirements for actual
+sheet/patch ownership are in
+[cortical_geometry_ownership.md](cortical_geometry_ownership.md). No additional
+full training or population experiment was launched on this failed v1.
