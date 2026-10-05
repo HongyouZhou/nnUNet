@@ -99,6 +99,30 @@ should remain intact, plus small/thin fragments. Whole-case all-child recovery
 alone is too coarse to diagnose this mechanism; report per-pair split success,
 child recovery and false splits together.
 
+## Completed baseline diagnosis (2026-10-05)
+
+All 68 baseline cases reproduced their frozen per-case metrics. 67/68 cases
+contain mixed markers, defined by at least 10% overlap with each of two GT
+instances. Of 517 children, 427 participate in mixed markers; 401 of those have
+at least 50% predicted cortical coverage. 354 adequately covered mixed-marker
+children have no predicted instance with individual IoU at least 0.5.
+
+78 children have coverage below 50%, so missing cortex is another genuine
+failure mode. Flags overlap. An optimistic GT-ownership assignment that removes
+all false positives yields a patient-macro coverage-based recovery upper bound
+of 0.8859226, compared with the actual recovery of 0.1783685. This is a diagnosis
+of available support, not an achievable or deployable method result.
+
+Three selected GT-assisted marker experiments improved recovery counts from
+1/6 to 6/6, 1/4 to 3/4, and 4/19 to 13/19 with the cortical union and separator
+field fixed. The last counterfactual also false-split two GT children; independent
+markers therefore do not resolve every assignment problem. CT panels and aligned
+NIfTI ROIs remain in the experiment artifacts, outside the source repository.
+
+This supports testing independent cortical ownership within a connected region,
+rather than treating any low-separator bridge as a compulsory merge. It does not
+yet establish that automatic geometry can supply the necessary ownership.
+
 ## Additional loss-representation audit
 
 The current pair generator includes same-instance pairs whose endpoints are
