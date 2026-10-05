@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import itertools
+from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import gaussian_filter, label
@@ -215,7 +216,7 @@ def constrained_partition(count, edges, strength, repulsive):
     return partition.astype(np.int32) + 1, rejected
 
 
-def geometry_ownership(semantic, separator_probability, ct, spacing, config=GeometryConfig()):
+def geometry_ownership(semantic, separator_probability, ct, spacing, config=GeometryConfig(), *, graph_output=None):
     """Automatic inference. No annotations, GT crop, or fragment count input."""
     config.validate()
     spacing = np.asarray(spacing, dtype=np.float64)
@@ -246,6 +247,15 @@ def geometry_ownership(semantic, separator_probability, ct, spacing, config=Geom
     output.ravel()[positions] = partition[voxel_patch]
     if not np.array_equal(output > 0, union):
         raise AssertionError("Geometry partition changed cortical coverage")
+    if graph_output is not None:
+        # Diagnostic cache contains prediction-derived features only. Saving it
+        # permits an annotation audit without re-running or changing inference.
+        np.savez_compressed(Path(graph_output), positions=positions, voxel_patch=voxel_patch,
+                            edges=edges, area=area, centers_mm=centers, partition=partition,
+                            fine_normals=fine[0], context_normals=context[0],
+                            fine_coherence=fine[1], context_coherence=context[1],
+                            strength=strength, candidate=candidate, repulsive=repulsive,
+                            fine_angles_deg=angles, excess_deg=excess)
     record.update(
         patch_count=count, edge_count=len(edges), candidate_repulsive_edges=int(candidate.sum()),
         supported_repulsive_edges=int(repulsive.sum()), rejected_bridge_merges=rejected,

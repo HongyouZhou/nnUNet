@@ -51,6 +51,58 @@ def sparse_evaluation(predicted, union, gt, validity):
     return evaluate_instances(predicted[support], union[support], gt[support], validity[support])
 
 
+def audit_graph(graph_path, gt, validity):
+    """Evaluate geometric constraints after inference; never supplies labels.
+
+    Accept only patches with >=80% of relation-valid owned voxels assigned to
+    one GT child, and >=50% of all patch voxels carrying valid ownership. Report
+    excluded edges to avoid presenting this conditional audit as full coverage.
+    """
+    with np.load(graph_path) as graph:
+        positions, patches = graph["positions"], graph["voxel_patch"]
+        edges, repulsive, partition = graph["edges"], graph["repulsive"], graph["partition"]
+        owners = gt.ravel()[positions]
+        valid = ((validity.ravel()[positions] & 2) != 0) & (owners > 0)
+        count = len(partition)
+        sizes = np.bincount(patches, minlength=count)
+        owned = np.bincount(patches[valid], minlength=count)
+        combinations, counts = np.unique(np.column_stack((patches[valid], owners[valid])), axis=0, return_counts=True)
+        dominant = np.zeros(count, np.int32)
+        largest = np.zeros(count, np.int64)
+        for (patch, owner), overlap in zip(combinations, counts):
+            if overlap > largest[patch]:
+                dominant[patch] = owner; largest[patch] = overlap
+        purity = largest / np.maximum(owned, 1)
+        retained = (purity >= 0.8) & (owned / sizes >= 0.5)
+        a, b = edges.T
+        usable = retained[a] & retained[b]
+        different = dominant[a] != dominant[b]
+        same_repulsive = usable & ~different & repulsive
+        different_repulsive = usable & different & repulsive
+        resolved = partition[a] != partition[b]
+        child_ids, child_counts = np.unique(dominant[a[same_repulsive]], return_counts=True)
+        angle = graph["fine_angles_deg"]
+        excess = graph["excess_deg"]
+        def quantiles(mask, values):
+            return np.quantile(values[mask], [0.5, 0.9, 0.99]).tolist() if mask.any() else []
+        denominator = int(np.count_nonzero(repulsive & usable))
+        return dict(
+            evaluation_only=True, minimum_owned_patch_fraction=0.5, minimum_owned_label_purity=0.8,
+            total_edges=len(edges), audited_edges=int(usable.sum()), excluded_edges=int((~usable).sum()),
+            total_repulsive_edges=int(repulsive.sum()), audited_repulsive_edges=denominator,
+            same_gt_repulsive_edges=int(same_repulsive.sum()), different_gt_repulsive_edges=int(different_repulsive.sum()),
+            different_gt_fraction_of_audited_repulsion=float(different_repulsive.sum() / denominator) if denominator else None,
+            same_gt_edges=int((usable & ~different).sum()), different_gt_edges=int((usable & different).sum()),
+            same_gt_edges_cut=int((usable & ~different & resolved).sum()), different_gt_edges_cut=int((usable & different & resolved).sum()),
+            same_gt_repulsion_by_child={str(int(i)): int(n) for i, n in zip(child_ids, child_counts)},
+            same_gt_angle_quantiles=quantiles(usable & ~different, angle),
+            different_gt_angle_quantiles=quantiles(usable & different, angle),
+            same_gt_excess_quantiles=quantiles(usable & ~different, excess),
+            different_gt_excess_quantiles=quantiles(usable & different, excess),
+            interpretation="Contact edges are correlated; this conditional development diagnostic is not an independent ownership-classifier score.",
+        )
+
+
 def ownership_evaluation(predicted, gt, validity, pairs, spacing):
     """Pair separation plus same-GT regions far from other annotated pieces."""
     gt = np.where((validity & 2) != 0, gt, 0)
@@ -151,7 +203,8 @@ def run_case(dataset, run_dir, diagnosis, output, case, fold, config=GeometryCon
     crop = prediction_crop(semantic, spacing, config)
     ct = np.asarray(ct_image.dataobj[crop], np.float32)
     probability = _load_probability_channel(artifact / "predictions" / f"{case}.npz", reference, 2)[crop].copy()
-    prediction, baseline, geometry = geometry_ownership(semantic[crop], probability, ct, spacing, config)
+    prediction, baseline, geometry = geometry_ownership(semantic[crop], probability, ct, spacing, config,
+                                                       graph_output=destination / "prediction-graph.npz")
     transform = np.eye(4); transform[:3, 3] = [s.start for s in crop]
     nib.save(nib.Nifti1Image(prediction, reference.affine @ transform), destination / "geometry_instances_crop.nii.gz")
     _write_json_atomic(destination / "prediction-contract.json", dict(
@@ -184,7 +237,8 @@ def run_case(dataset, run_dir, diagnosis, output, case, fold, config=GeometryCon
                   source_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                   baseline_metrics=baseline_metrics, geometry_metrics=metrics, baseline_ownership=baseline_ownership,
                   geometry_ownership=ownership, selected_pair=inspection["selected_pair"]["gt_ids"],
-                  inference_annotation_access=False)
+                  inference_annotation_access=False,
+                  graph_audit=audit_graph(destination / "prediction-graph.npz", gt[crop], validity[crop]))
     _write_json_atomic(destination / "result.json", record)
     print(json.dumps(dict(case=case, baseline=baseline_metrics, geometry=metrics, graph=geometry)), flush=True)
     return record

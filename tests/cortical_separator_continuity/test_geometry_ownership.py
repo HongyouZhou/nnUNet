@@ -7,7 +7,7 @@ from tools.charite_cortical.geometry_ownership import (
     GeometryConfig, constrained_partition, geometry_ownership, patch_graph,
     sheet_relations, supported_repulsion,
 )
-from tools.charite_cortical.run_geometry_ownership import prediction_crop, sparse_evaluation
+from tools.charite_cortical.run_geometry_ownership import audit_graph, prediction_crop, sparse_evaluation
 
 
 def test_repulsive_ownership_survives_a_stronger_smooth_residual_bridge():
@@ -96,6 +96,39 @@ def test_ct_normal_curvature_control_has_no_geometry_false_split(spacing):
     assert record["supported_repulsive_edges"] == 0
     assert len(np.unique(output[output > 0])) == 1
     np.testing.assert_array_equal(output > 0, baseline > 0)
+
+
+def test_automatic_ct_direction_evidence_can_separate_a_connected_sharp_sheet():
+    spacing = np.array([0.6, 0.6, 0.6])
+    shape = (70, 50, 85)
+    x, y, z = np.indices(shape) * spacing[:, None, None, None]
+    x -= 21; z -= 10
+    distance = z - 0.9 * np.abs(x)
+    ct = (1200 * np.exp(-0.5 * (distance / 0.65)**2)).astype(np.float32)
+    semantic = (np.abs(distance) <= 0.8).astype(np.int16)
+    assert label(semantic, structure=np.ones((3, 3, 3)))[1] == 1
+    output, _, record = geometry_ownership(semantic, np.zeros(shape, np.float32), ct, spacing)
+    target = np.where(semantic, np.where(x < 0, 1, 2), 0)
+    metrics = sparse_evaluation(output, semantic > 0, target, np.full(shape, 3))
+    assert record["supported_repulsive_edges"] > 0
+    assert metrics["recovered_child_count"] == 2
+    assert metrics["false_split_child_count"] == 0
+    # The synthetic ownership is stipulated. This does not certify that an
+    # anatomically intact sharp ridge should be split on real CT.
+
+
+def test_graph_audit_measures_same_fragment_repulsion_without_affecting_prediction(tmp_path):
+    graph = tmp_path / "graph.npz"
+    np.savez(graph, positions=np.arange(6), voxel_patch=np.arange(6), edges=np.array([[0, 1], [1, 2], [2, 3], [4, 5]]),
+             repulsive=np.array([True, False, True, True]), partition=np.arange(1, 7),
+             fine_angles_deg=np.array([35, 10, 40, 45]), excess_deg=np.array([15, 2, 20, 25]))
+    gt = np.array([1, 1, 1, 2, 2, 3]); validity = np.array([3, 3, 3, 3, 3, 1])
+    result = audit_graph(graph, gt, validity)
+    assert result["audited_edges"] == 3
+    assert result["excluded_edges"] == 1
+    assert result["same_gt_repulsive_edges"] == 1
+    assert result["different_gt_repulsive_edges"] == 1
+    assert result["different_gt_fraction_of_audited_repulsion"] == 0.5
 
 
 def test_prediction_crop_depends_only_on_prediction_and_physical_context():
