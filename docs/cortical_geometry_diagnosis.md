@@ -123,6 +123,20 @@ This supports testing independent cortical ownership within a connected region,
 rather than treating any low-separator bridge as a compulsory merge. It does not
 yet establish that automatic geometry can supply the necessary ownership.
 
+On the same 28 pilot cases (222 children), all three arms have mixed markers
+in all 28 cases. The baseline, continuity and continuity+density arms have
+180, 189 and 190 children in mixed markers, respectively; 171, 175 and 176 of
+those children have at least 50% predicted coverage. Thus the local loss
+increments did not remove this marker failure mode.
+
+Two automatic seed controls kept the union and separator field frozen and used
+no GT for seed generation: connected predicted cortical-body voxels (argmax
+class 1), or low-separator voxels with threshold 0.3. Both retained 26 neighbours
+and the 10-voxel seed filter. Recovery stayed at 1/6 and 1/4 in the first two
+selected cases and improved only from 4/19 to 5/19 in the third. These selected
+case controls do not establish a tuned method's population performance, but
+show that those simple marker changes did not reproduce the oracle gains.
+
 ## Additional loss-representation audit
 
 The current pair generator includes same-instance pairs whose endpoints are
